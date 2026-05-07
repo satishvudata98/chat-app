@@ -1,0 +1,29 @@
+{
+  "cli": {
+    "version": ">= 10.2.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://dashing-chickadee-619.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://dashing-chickadee-619.convex.site"
+      }
+    },
+    "production": {}
+  },
+  "submit": {
+    "production": {}
+  }
+}
