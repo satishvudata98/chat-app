@@ -13,6 +13,7 @@ export default defineSchema({
     participants: v.array(v.string()), // Array of userIds
     lastMessageId: v.optional(v.id("messages")),
     updatedAt: v.number(),
+    unreadCounts: v.optional(v.record(v.string(), v.number())),
   }),
 
   messages: defineTable({

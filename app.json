@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.chatnext.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -28,6 +29,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "default",
+          "color": "#00A884"
+        }
+      ],
       [
         "expo-splash-screen",
         {

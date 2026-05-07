@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,6 +29,17 @@ export default function ChatScreen() {
   const editMessage = useMutation(api.messages.editMessage);
   // @ts-ignore
   const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
+  // @ts-ignore
+  const markChatRead = useMutation(api.messages.markChatRead);
+
+  useEffect(() => {
+    if (!userId || !id || messages === undefined) return;
+
+    markChatRead({
+      chatId: id as Id<"chats">,
+      userId,
+    }).catch((e) => console.error("Failed to mark chat read", e));
+  }, [id, userId, messages, markChatRead]);
 
   const handleSend = async () => {
     if (!text.trim()) return;

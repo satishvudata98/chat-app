@@ -8,7 +8,9 @@ export const listChats = query({
     // Note: In a production app, it's better to store participant lists or a separate ChatMembers table.
     // Here we query all chats where participants array contains our userId
     const chats = await ctx.db.query("chats").collect();
-    const myChats = chats.filter(c => c.participants.includes(args.userId));
+    const myChats = chats
+      .filter(c => c.participants.includes(args.userId))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
     
     // Enrich with other user's details and last message
     return await Promise.all(
@@ -25,6 +27,7 @@ export const listChats = query({
           ...chat,
           otherUser,
           lastMessage,
+          unreadCount: chat.unreadCounts?.[args.userId] ?? 0,
         };
       })
     );
@@ -44,6 +47,10 @@ export const getOrCreateChat = mutation({
     return await ctx.db.insert("chats", {
       participants: [args.myUserId, args.otherUserId],
       updatedAt: Date.now(),
+      unreadCounts: {
+        [args.myUserId]: 0,
+        [args.otherUserId]: 0,
+      },
     });
   },
 });
@@ -95,6 +102,12 @@ export const sendMessage = mutation({
     replyToId: v.optional(v.id("messages")),
   },
   handler: async (ctx, args) => {
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat) throw new Error("Chat not found");
+    if (!chat.participants.includes(args.senderId)) {
+      throw new Error("Sender is not a chat participant");
+    }
+
     const messageId = await ctx.db.insert("messages", {
       chatId: args.chatId,
       senderId: args.senderId,
@@ -105,9 +118,18 @@ export const sendMessage = mutation({
       replyToId: args.replyToId,
     });
 
+    const unreadCounts = { ...(chat.unreadCounts ?? {}) };
+    for (const participantId of chat.participants) {
+      unreadCounts[participantId] =
+        participantId === args.senderId
+          ? 0
+          : (unreadCounts[participantId] ?? 0) + 1;
+    }
+
     await ctx.db.patch(args.chatId, {
       lastMessageId: messageId,
       updatedAt: Date.now(),
+      unreadCounts,
     });
 
     // Fire push notification in the background
@@ -118,6 +140,26 @@ export const sendMessage = mutation({
     });
 
     return messageId;
+  },
+});
+
+export const markChatRead = mutation({
+  args: {
+    chatId: v.id("chats"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat) throw new Error("Chat not found");
+    if (!chat.participants.includes(args.userId)) {
+      throw new Error("User is not a chat participant");
+    }
+
+    const unreadCounts = { ...(chat.unreadCounts ?? {}) };
+    if ((unreadCounts[args.userId] ?? 0) === 0) return;
+
+    unreadCounts[args.userId] = 0;
+    await ctx.db.patch(args.chatId, { unreadCounts });
   },
 });
 

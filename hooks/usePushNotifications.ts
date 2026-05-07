@@ -28,9 +28,10 @@ export function usePushNotifications() {
 
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
-          shouldShowAlert: true,
           shouldPlaySound: true,
           shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
         }),
       });
 
@@ -76,6 +77,11 @@ async function registerForPushNotificationsAsync(Notifications: any) {
     
     const projectId =
       Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+
+    if (!projectId) {
+      console.log('Project ID not found for push notifications');
+      return;
+    }
     
     try {
       token = (
@@ -83,6 +89,7 @@ async function registerForPushNotificationsAsync(Notifications: any) {
           projectId,
         })
       ).data;
+      console.log('Expo push token registered', token);
     } catch (e) {
       console.log('Error getting push token', e);
     }

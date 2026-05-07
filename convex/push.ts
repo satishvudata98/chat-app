@@ -41,12 +41,8 @@ export const sendPushNotification = internalAction({
     messageContent: v.string(),
   },
   handler: async (ctx, args) => {
-    // In an action, we can't directly read the DB without a query.
-    // Wait, in modern Convex we can use `ctx.runQuery`
     const { chatId, senderId, messageContent } = args;
 
-    // To read from DB inside an action, we need an internal query.
-    // Let's call an internal query to get recipient push tokens.
     const recipients = await ctx.runQuery(internal.push.getPushTokensForChat, {
       chatId,
       senderId,
@@ -55,7 +51,7 @@ export const sendPushNotification = internalAction({
     for (const recipient of recipients) {
       if (recipient.pushToken) {
         try {
-          await fetch("https://exp.host/--/api/v2/push/send", {
+          const response = await fetch("https://exp.host/--/api/v2/push/send", {
             method: "POST",
             headers: {
               Accept: "application/json",
@@ -66,9 +62,17 @@ export const sendPushNotification = internalAction({
               to: recipient.pushToken,
               title: recipient.senderName,
               body: messageContent,
+              sound: "default",
+              priority: "high",
+              channelId: "default",
               data: { chatId },
             }),
           });
+
+          const ticket = await response.json();
+          if (!response.ok || ticket.data?.status === "error") {
+            console.error("Expo push notification error", ticket);
+          }
         } catch (error) {
           console.error("Failed to send push notification", error);
         }

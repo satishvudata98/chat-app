@@ -14,11 +14,11 @@ export default function ChatsScreen() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.scanButton}
         onPress={() => router.push('/scan')}
       >
-        <Text style={styles.scanButtonText}>📷 Scan QR to Chat</Text>
+        <Text style={styles.scanButtonText}>Scan QR to Chat</Text>
       </TouchableOpacity>
 
       {chats === undefined ? (
@@ -26,30 +26,44 @@ export default function ChatsScreen() {
       ) : chats.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No chats yet.</Text>
-          <Text style={styles.emptySubtext}>Scan a friend's QR code to start.</Text>
+          <Text style={styles.emptySubtext}>{"Scan a friend's QR code to start."}</Text>
         </View>
       ) : (
         <FlatList
           data={chats}
           keyExtractor={(item) => item._id}
-          renderItem={({ item }) => (
-            <TouchableOpacity 
-              style={styles.chatItem}
-              onPress={() => router.push(`/chat/${item._id}`)}
-            >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {item.otherUser?.name?.[0]?.toUpperCase() || '?'}
-                </Text>
-              </View>
-              <View style={styles.chatInfo}>
-                <Text style={styles.chatName}>{item.otherUser?.name || 'Unknown User'}</Text>
-                <Text style={styles.lastMessage} numberOfLines={1}>
-                  {item.lastMessage?.content || (item.lastMessage?.type === 'image' ? '📷 Image' : 'Start chatting')}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          renderItem={({ item }) => {
+            const unreadCount = item.unreadCount ?? 0;
+            const hasUnread = unreadCount > 0;
+
+            return (
+              <TouchableOpacity
+                style={styles.chatItem}
+                onPress={() => router.push(`/chat/${item._id}`)}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {item.otherUser?.name?.[0]?.toUpperCase() || '?'}
+                  </Text>
+                </View>
+                <View style={styles.chatInfo}>
+                  <Text style={[styles.chatName, hasUnread && styles.unreadText]}>
+                    {item.otherUser?.name || 'Unknown User'}
+                  </Text>
+                  <Text style={[styles.lastMessage, hasUnread && styles.unreadText]} numberOfLines={1}>
+                    {item.lastMessage?.content || (item.lastMessage?.type === 'image' ? 'Image' : 'Start chatting')}
+                  </Text>
+                </View>
+                {hasUnread && (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          }}
         />
       )}
     </View>
@@ -116,6 +130,7 @@ const styles = StyleSheet.create({
   },
   chatInfo: {
     flex: 1,
+    marginRight: 12,
   },
   chatName: {
     fontSize: 16,
@@ -125,5 +140,23 @@ const styles = StyleSheet.create({
   lastMessage: {
     fontSize: 14,
     color: '#666',
+  },
+  unreadText: {
+    fontWeight: 'bold',
+    color: '#111',
+  },
+  unreadBadge: {
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#00A884',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 7,
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });
