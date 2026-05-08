@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as appConfig from "../appConfig.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as push from "../push.js";
@@ -20,6 +21,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  appConfig: typeof appConfig;
   http: typeof http;
   messages: typeof messages;
   push: typeof push;

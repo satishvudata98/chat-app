@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal } from 'react-native';
+import { useHeaderHeight } from '@react-navigation/elements';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { useLocalSearchParams } from 'expo-router';
-import { useQuery, useMutation } from 'convex/react';
+import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useQuery, useMutation, usePaginatedQuery } from 'convex/react';
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
 import { useUser } from '../../store/UserContext';
@@ -11,6 +13,8 @@ import { Id } from '../../convex/_generated/dataModel';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const navigation = useNavigation();
+  const headerHeight = useHeaderHeight();
   const { userId } = useUser();
   const [text, setText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -22,7 +26,20 @@ export default function ChatScreen() {
   const [optionsMessage, setOptionsMessage] = useState<any | null>(null);
 
   // @ts-ignore
-  const messages = useQuery(api.messages.getMessages, { chatId: id as Id<"chats"> });
+  const chatDetails = useQuery(
+    api.messages.getChatDetails,
+    id && userId ? { chatId: id as Id<"chats">, userId } : 'skip',
+  );
+  // @ts-ignore
+  const {
+    results: messages,
+    status: messageStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    api.messages.getMessages,
+    id && userId ? { chatId: id as Id<"chats">, viewerUserId: userId } : 'skip',
+    { initialNumItems: 30 },
+  );
   // @ts-ignore
   const sendMessage = useMutation(api.messages.sendMessage);
   // @ts-ignore
@@ -33,16 +50,20 @@ export default function ChatScreen() {
   const markChatRead = useMutation(api.messages.markChatRead);
 
   useEffect(() => {
-    if (!userId || !id || messages === undefined) return;
+    navigation.setOptions({ title: chatDetails?.otherUser?.name || 'Chat' });
+  }, [chatDetails?.otherUser?.name, navigation]);
+
+  useEffect(() => {
+    if (!userId || !id || messageStatus === 'LoadingFirstPage') return;
 
     markChatRead({
       chatId: id as Id<"chats">,
       userId,
     }).catch((e) => console.error("Failed to mark chat read", e));
-  }, [id, userId, messages, markChatRead]);
+  }, [id, userId, messages.length, messageStatus, markChatRead]);
 
   const handleSend = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || !userId) return;
 
     const content = text.trim();
     setText('');
@@ -101,7 +122,7 @@ export default function ChatScreen() {
   };
 
   const confirmAndSendImage = async () => {
-    if (!pendingImage) return;
+    if (!pendingImage || !userId) return;
     setIsUploading(true);
     try {
       const postUrl = await generateUploadUrl();
@@ -152,7 +173,7 @@ export default function ChatScreen() {
     }
   };
 
-  const reversedMessages = messages ? [...messages].reverse() : [];
+  const reversedMessages = messages;
 
   const renderItem = ({ item, index }: { item: any, index: number }) => {
     const isMe = item.senderId === userId;
@@ -215,19 +236,32 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior="padding"
-      keyboardVerticalOffset={90}
-    >
+    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+      >
       <FlatList
         inverted
         data={reversedMessages}
         keyExtractor={(item) => item._id}
         renderItem={renderItem}
         contentContainerStyle={styles.messagesContainer}
+        onEndReached={() => {
+          if (messageStatus === 'CanLoadMore') {
+            loadMore(30);
+          }
+        }}
+        onEndReachedThreshold={0.2}
+        ListFooterComponent={
+          messageStatus === 'LoadingMore' ? (
+            <ActivityIndicator color="#00A884" style={styles.loadingMore} />
+          ) : null
+        }
       />
 
+      <View style={styles.composerContainer}>
       {(replyingToMessage || editingMessageId) && (
         <View style={styles.inputActionPreview}>
           <View style={styles.inputActionLeft}>
@@ -235,7 +269,7 @@ export default function ChatScreen() {
               {editingMessageId ? 'Editing Message' : 'Replying to message'}
             </Text>
             <Text style={styles.inputActionContent} numberOfLines={1}>
-              {editingMessageId ? text : (replyingToMessage.type === 'image' ? '📷 Image' : replyingToMessage.content)}
+              {editingMessageId ? text : (replyingToMessage.type === 'image' ? 'Image' : replyingToMessage.content)}
             </Text>
           </View>
           <TouchableOpacity
@@ -248,14 +282,18 @@ export default function ChatScreen() {
             }}
             style={styles.inputActionClose}
           >
-            <Text style={styles.inputActionCloseText}>✕</Text>
+            <Ionicons name="close" size={20} color="#777" />
           </TouchableOpacity>
         </View>
       )}
 
       <View style={styles.inputContainer}>
         <TouchableOpacity style={styles.attachButton} onPress={pickImage} disabled={isUploading}>
-          {isUploading ? <ActivityIndicator size="small" color="#00A884" /> : <Text style={styles.attachButtonText}>+</Text>}
+          {isUploading ? (
+            <ActivityIndicator size="small" color="#00A884" />
+          ) : (
+            <Ionicons name="add" size={30} color="#00A884" />
+          )}
         </TouchableOpacity>
         <TextInput
           style={styles.input}
@@ -269,8 +307,9 @@ export default function ChatScreen() {
           onPress={handleSend}
           disabled={!text.trim()}
         >
-          <Text style={styles.sendButtonText}>➤</Text>
+          <Ionicons name="send" size={19} color="#fff" />
         </TouchableOpacity>
+      </View>
       </View>
 
       {/* Image Preview Modal before sending */}
@@ -297,7 +336,7 @@ export default function ChatScreen() {
               multiline
             />
             <TouchableOpacity style={styles.sendButton} onPress={confirmAndSendImage} disabled={isUploading}>
-              {isUploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendButtonText}>➤</Text>}
+              {isUploading ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={19} color="#fff" />}
             </TouchableOpacity>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -307,7 +346,7 @@ export default function ChatScreen() {
       <Modal visible={!!viewingImage} transparent={true} animationType="fade" onRequestClose={() => setViewingImage(null)}>
         <View style={styles.viewerContainer}>
           <TouchableOpacity style={styles.viewerCloseButton} onPress={() => setViewingImage(null)}>
-            <Text style={styles.viewerCloseText}>✕</Text>
+            <Ionicons name="close" size={32} color="#fff" />
           </TouchableOpacity>
           <Image source={{ uri: viewingImage! }} style={styles.viewerImage} resizeMode="contain" />
         </View>
@@ -332,18 +371,26 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </Modal>
 
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#e5ddd5',
+  },
   container: {
     flex: 1,
     backgroundColor: '#e5ddd5', // WhatsApp background color
   },
   messagesContainer: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 20,
+  },
+  loadingMore: {
+    paddingVertical: 12,
   },
   messageBubble: {
     maxWidth: '80%',
@@ -381,12 +428,16 @@ const styles = StyleSheet.create({
   theirTimestamp: {
     color: '#667781',
   },
+  composerContainer: {
+    backgroundColor: '#e5ddd5',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+  },
   inputContainer: {
     flexDirection: 'row',
     padding: 8,
-    backgroundColor: 'transparent',
+    backgroundColor: '#e5ddd5',
     alignItems: 'flex-end',
-    marginBottom: Platform.OS === 'ios' ? 0 : 8,
   },
   input: {
     flex: 1,
@@ -408,11 +459,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 8,
   },
-  attachButtonText: {
-    fontSize: 28,
-    color: '#00A884',
-    fontWeight: '300',
-  },
   sendButton: {
     backgroundColor: '#00A884',
     width: 44,
@@ -425,11 +471,6 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#ccc',
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontSize: 20,
-    marginLeft: 2, // Center the arrow slightly better
   },
   previewContainer: {
     flex: 1,
@@ -478,11 +519,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
     padding: 10,
   },
-  viewerCloseText: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: 'bold',
-  },
   viewerImage: {
     width: '100%',
     height: '80%',
@@ -503,9 +539,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#f0f0f0',
     padding: 10,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
     marginHorizontal: 8,
+    marginTop: 8,
+    borderRadius: 10,
     borderLeftWidth: 4,
     borderLeftColor: '#00A884',
   },
@@ -525,10 +561,6 @@ const styles = StyleSheet.create({
   inputActionClose: {
     padding: 4,
     justifyContent: 'center',
-  },
-  inputActionCloseText: {
-    fontSize: 18,
-    color: '#999',
   },
   optionsOverlay: {
     flex: 1,

@@ -6,12 +6,14 @@
   "build": {
     "development": {
       "developmentClient": true,
+      "channel": "development",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
     },
     "preview": {
+      "channel": "preview",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -21,7 +23,9 @@
         "EXPO_PUBLIC_CONVEX_SITE_URL": "https://dashing-chickadee-619.convex.site"
       }
     },
-    "production": {}
+    "production": {
+      "channel": "production"
+    }
   },
   "submit": {
     "production": {}

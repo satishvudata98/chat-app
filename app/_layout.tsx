@@ -8,6 +8,8 @@ import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { UserProvider, useUser } from '../store/UserContext';
 import { View, ActivityIndicator } from 'react-native';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useLinkCurrentDeviceToUser } from '../hooks/useDeviceProfile';
+import { NativeUpdatePrompt } from '../components/NativeUpdatePrompt';
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL || "https://example.convex.cloud");
 
@@ -18,6 +20,7 @@ function AuthState() {
   
   // Initialize push notifications tracking
   usePushNotifications();
+  useLinkCurrentDeviceToUser();
 
   if (isLoading) {
     return (
@@ -45,6 +48,7 @@ export default function RootLayout() {
       <UserProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <AuthState />
+          <NativeUpdatePrompt />
           <StatusBar style="auto" />
         </ThemeProvider>
       </UserProvider>

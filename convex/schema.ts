@@ -7,14 +7,30 @@ export default defineSchema({
     name: v.string(),
     avatarUrl: v.optional(v.string()),
     pushToken: v.optional(v.string()),
-  }).index("by_userId", ["userId"]),
+    deviceId: v.optional(v.string()),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_deviceId", ["deviceId"]),
 
   chats: defineTable({
     participants: v.array(v.string()), // Array of userIds
+    participantA: v.optional(v.string()),
+    participantB: v.optional(v.string()),
+    pairKey: v.optional(v.string()),
     lastMessageId: v.optional(v.id("messages")),
     updatedAt: v.number(),
+    lastReadAt: v.optional(v.record(v.string(), v.number())),
     unreadCounts: v.optional(v.record(v.string(), v.number())),
-  }),
+  })
+    .index("by_participantA_and_updatedAt", ["participantA", "updatedAt"])
+    .index("by_participantB_and_updatedAt", ["participantB", "updatedAt"])
+    .index("by_pairKey", ["pairKey"]),
+
+  chatArchives: defineTable({
+    userId: v.string(),
+    chatId: v.id("chats"),
+    archivedAt: v.number(),
+  }).index("by_userId_and_chatId", ["userId", "chatId"]),
 
   messages: defineTable({
     chatId: v.id("chats"),
@@ -26,4 +42,12 @@ export default defineSchema({
     isEdited: v.optional(v.boolean()),
     replyToId: v.optional(v.id("messages")),
   }).index("by_chatId", ["chatId"]),
+
+  appConfig: defineTable({
+    key: v.string(),
+    latestVersion: v.string(),
+    minimumVersion: v.string(),
+    apkUrl: v.string(),
+    message: v.optional(v.string()),
+  }).index("by_key", ["key"]),
 });
