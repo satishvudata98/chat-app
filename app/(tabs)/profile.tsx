@@ -1,15 +1,18 @@
 import React, { useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Share } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Share } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useUser } from '../../store/UserContext';
 import { useQuery } from 'convex/react';
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
+import { useAppTheme } from '../../store/ThemeContext';
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { userId } = useUser();
+  const { colors } = useAppTheme();
   // @ts-ignore
   const user = useQuery(api.users.getUser, userId ? { userId } : 'skip');
 
@@ -17,8 +20,8 @@ export default function ProfileScreen() {
 
   if (!userId || !user) {
     return (
-      <View style={styles.container}>
-        <Text>Loading profile...</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.textSecondary }}>Loading profile...</Text>
       </View>
     );
   }
@@ -63,12 +66,12 @@ export default function ProfileScreen() {
   const qrValue = `chatapp://user/${userId}`;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.name}>{user.name}</Text>
-        <Text style={styles.subtitle}>Scan to chat</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.card, { backgroundColor: colors.panel, borderColor: colors.border }]}>
+        <Text style={[styles.name, { color: colors.text }]}>{user.name}</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Scan to chat</Text>
         
-        <View style={styles.qrContainer}>
+        <View style={[styles.qrContainer, { borderColor: colors.border }]}>
           <QRCode
             getRef={(c) => (qrRef.current = c)}
             value={qrValue}
@@ -84,11 +87,16 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         */}
 
-        <TouchableOpacity style={[styles.shareButton, styles.shareLinkButton]} onPress={shareProfileLink}>
-          <Text style={styles.shareLinkButtonText}>Share Profile Link</Text>
+        <TouchableOpacity style={[styles.shareButton, styles.shareLinkButton, { borderColor: colors.primary }]} onPress={shareProfileLink}>
+          <Text style={[styles.shareLinkButtonText, { color: colors.primary }]}>Share Profile Link</Text>
         </TouchableOpacity>
 
-        <Text style={styles.idText}>ID: {userId}</Text>
+        <TouchableOpacity style={[styles.shareButton, { backgroundColor: colors.primary }]} onPress={() => router.push('/scan')}>
+          <Ionicons name="scan-outline" size={18} color="#fff" />
+          <Text style={styles.shareButtonText}>Scan QR to Connect</Text>
+        </TouchableOpacity>
+
+        <Text style={[styles.idText, { color: colors.textSecondary }]}>ID: {userId}</Text>
       </View>
     </View>
   );
@@ -98,19 +106,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 24,
-    backgroundColor: '#f5f5f5',
     alignItems: 'center',
     justifyContent: 'center',
   },
   card: {
-    backgroundColor: '#fff',
     padding: 32,
-    borderRadius: 16,
+    borderRadius: 8,
+    borderWidth: 1,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
   },
   name: {
     fontSize: 24,
@@ -119,7 +122,6 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 24,
   },
   qrContainer: {
@@ -127,7 +129,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#eee',
     marginBottom: 24,
   },
   idText: {
@@ -136,12 +137,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   shareButton: {
-    backgroundColor: '#00A884',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
     marginTop: 8,
     marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   shareButtonText: {
     color: '#fff',
@@ -151,11 +154,9 @@ const styles = StyleSheet.create({
   shareLinkButton: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#00A884',
     marginTop: 0,
   },
   shareLinkButtonText: {
-    color: '#00A884',
     fontWeight: 'bold',
     fontSize: 16,
   },

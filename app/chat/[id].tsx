@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal } from 'react-native';
-import { useHeaderHeight } from '@react-navigation/elements';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useQuery, useMutation, usePaginatedQuery } from 'convex/react';
@@ -10,11 +9,13 @@ import { useQuery, useMutation, usePaginatedQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { useUser } from '../../store/UserContext';
 import { Id } from '../../convex/_generated/dataModel';
+import { useAppTheme } from '../../store/ThemeContext';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
-  const headerHeight = useHeaderHeight();
+  const { colors: theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { userId } = useUser();
   const [text, setText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -24,6 +25,7 @@ export default function ChatScreen() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
   const [optionsMessage, setOptionsMessage] = useState<any | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // @ts-ignore
   const chatDetails = useQuery(
@@ -48,6 +50,23 @@ export default function ChatScreen() {
   const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
   // @ts-ignore
   const markChatRead = useMutation(api.messages.markChatRead);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     navigation.setOptions({ title: chatDetails?.otherUser?.name || 'Chat' });
@@ -174,6 +193,8 @@ export default function ChatScreen() {
   };
 
   const reversedMessages = messages;
+  const keyboardCushion = keyboardHeight > 0 ? 8 : 0;
+  const composerBottomOffset = Math.max(keyboardHeight - insets.bottom + keyboardCushion, 0);
 
   const renderItem = ({ item, index }: { item: any, index: number }) => {
     const isMe = item.senderId === userId;
@@ -193,33 +214,42 @@ export default function ChatScreen() {
     return (
       <View>
         <TouchableOpacity onLongPress={() => handleLongPress(item)} activeOpacity={0.8} delayLongPress={250}>
-          <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.theirMessage]}>
+          <View
+            style={[
+              styles.messageBubble,
+              isMe ? styles.myMessage : styles.theirMessage,
+              {
+                backgroundColor: isMe ? theme.outgoingBubble : theme.incomingBubble,
+                borderColor: isMe ? theme.outgoingBubble : theme.incomingBubble,
+              },
+            ]}
+          >
             {item.repliedMessage && (
-              <View style={styles.replyPreviewBubble}>
-                <Text style={styles.replyPreviewText} numberOfLines={2}>{item.repliedMessage.content}</Text>
+              <View style={[styles.replyPreviewBubble, { borderLeftColor: theme.primary }]}>
+                <Text style={[styles.replyPreviewText, { color: isMe ? 'rgba(255,255,255,0.84)' : theme.textSecondary }]} numberOfLines={2}>{item.repliedMessage.content}</Text>
               </View>
             )}
 
             {item.type === 'text' ? (
-              <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.theirMessageText]}>
+              <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
                 {item.content}
               </Text>
             ) : item.url ? (
               <TouchableOpacity onPress={() => setViewingImage(item.url)} activeOpacity={0.8}>
                 <Image source={{ uri: item.url }} style={{ width: 220, height: 220, borderRadius: 8, marginBottom: 4 }} resizeMode="cover" />
                 {item.content ? (
-                  <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.theirMessageText]}>
+                  <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
                     {item.content}
                   </Text>
                 ) : null}
               </TouchableOpacity>
             ) : (
-              <Text style={styles.messageText}>Loading image...</Text>
+              <Text style={[styles.messageText, { color: theme.text }]}>Loading image...</Text>
             )}
 
             <View style={{ flexDirection: 'row', alignSelf: 'flex-end', marginTop: 4, alignItems: 'center' }}>
-              {item.isEdited && <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.theirTimestamp, { marginRight: 4 }]}>Edited</Text>}
-              <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.theirTimestamp, { marginTop: 0 }]}>
+              {item.isEdited && <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginRight: 4 }]}>Edited</Text>}
+              <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginTop: 0 }]}>
                 {timeString}
               </Text>
             </View>
@@ -227,8 +257,8 @@ export default function ChatScreen() {
         </TouchableOpacity>
 
         {showDateHeader && (
-          <View style={styles.dateHeaderContainer}>
-            <Text style={styles.dateHeaderText}>{formatDate(item._creationTime)}</Text>
+          <View style={[styles.dateHeaderContainer, { backgroundColor: theme.panel }]}>
+            <Text style={[styles.dateHeaderText, { color: theme.textSecondary }]}>{formatDate(item._creationTime)}</Text>
           </View>
         )}
       </View>
@@ -236,12 +266,8 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
-      >
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.chatBackground }]} edges={['bottom']}>
+      <View style={[styles.container, { backgroundColor: theme.chatBackground }]}>
       <FlatList
         inverted
         data={reversedMessages}
@@ -261,14 +287,23 @@ export default function ChatScreen() {
         }
       />
 
-      <View style={styles.composerContainer}>
+      <View
+        style={[
+          styles.composerContainer,
+          {
+            backgroundColor: theme.chatBackground,
+            borderTopColor: theme.border,
+            marginBottom: composerBottomOffset,
+          },
+        ]}
+      >
       {(replyingToMessage || editingMessageId) && (
-        <View style={styles.inputActionPreview}>
+        <View style={[styles.inputActionPreview, { backgroundColor: theme.panelSoft, borderLeftColor: theme.primary }]}>
           <View style={styles.inputActionLeft}>
-            <Text style={styles.inputActionTitle}>
+            <Text style={[styles.inputActionTitle, { color: theme.primary }]}>
               {editingMessageId ? 'Editing Message' : 'Replying to message'}
             </Text>
-            <Text style={styles.inputActionContent} numberOfLines={1}>
+            <Text style={[styles.inputActionContent, { color: theme.textSecondary }]} numberOfLines={1}>
               {editingMessageId ? text : (replyingToMessage.type === 'image' ? 'Image' : replyingToMessage.content)}
             </Text>
           </View>
@@ -282,32 +317,43 @@ export default function ChatScreen() {
             }}
             style={styles.inputActionClose}
           >
-            <Ionicons name="close" size={20} color="#777" />
+            <Ionicons name="close" size={20} color={theme.textSecondary} />
           </TouchableOpacity>
         </View>
       )}
 
-      <View style={styles.inputContainer}>
-        <TouchableOpacity style={styles.attachButton} onPress={pickImage} disabled={isUploading}>
+      <View style={[styles.inputContainer, { backgroundColor: theme.chatBackground }]}>
+        <TouchableOpacity style={[styles.attachButton, { backgroundColor: theme.panel }]} onPress={pickImage} disabled={isUploading}>
           {isUploading ? (
-            <ActivityIndicator size="small" color="#00A884" />
+            <ActivityIndicator size="small" color={theme.primary} />
           ) : (
-            <Ionicons name="add" size={30} color="#00A884" />
+            <Ionicons name="image-outline" size={23} color={theme.text} />
           )}
         </TouchableOpacity>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              backgroundColor: theme.panel,
+              borderColor: theme.panel,
+              color: theme.text,
+            },
+          ]}
           placeholder="Type a message"
+          placeholderTextColor={theme.textSecondary}
           value={text}
           onChangeText={setText}
           multiline
         />
         <TouchableOpacity
-          style={[styles.sendButton, !text.trim() && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton,
+            { backgroundColor: text.trim() ? theme.primary : theme.panel },
+          ]}
           onPress={handleSend}
           disabled={!text.trim()}
         >
-          <Ionicons name="send" size={19} color="#fff" />
+          <Ionicons name="send-outline" size={22} color={text.trim() ? '#fff' : theme.textSecondary} />
         </TouchableOpacity>
       </View>
       </View>
@@ -335,7 +381,7 @@ export default function ChatScreen() {
               onChangeText={setCaption}
               multiline
             />
-            <TouchableOpacity style={styles.sendButton} onPress={confirmAndSendImage} disabled={isUploading}>
+            <TouchableOpacity style={[styles.sendButton, { backgroundColor: theme.primary }]} onPress={confirmAndSendImage} disabled={isUploading}>
               {isUploading ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={19} color="#fff" />}
             </TouchableOpacity>
           </KeyboardAvoidingView>
@@ -371,7 +417,7 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </Modal>
 
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -379,46 +425,41 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#e5ddd5',
   },
   container: {
     flex: 1,
-    backgroundColor: '#e5ddd5', // WhatsApp background color
   },
   messagesContainer: {
-    padding: 16,
-    paddingBottom: 20,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   loadingMore: {
     paddingVertical: 12,
   },
   messageBubble: {
-    maxWidth: '80%',
-    padding: 12,
-    borderRadius: 16,
-    marginBottom: 8,
+    maxWidth: '82%',
+    paddingHorizontal: 9,
+    paddingTop: 6,
+    paddingBottom: 5,
+    borderRadius: 7,
+    marginBottom: 3,
+    borderWidth: 1,
   },
   myMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#dcf8c6',
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: 2,
   },
   theirMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
+    borderBottomLeftRadius: 2,
   },
   messageText: {
-    fontSize: 16,
-  },
-  myMessageText: {
-    color: '#000',
-  },
-  theirMessageText: {
-    color: '#000',
+    fontSize: 15.5,
+    lineHeight: 20,
   },
   timestamp: {
-    fontSize: 10,
+    fontSize: 10.5,
     alignSelf: 'flex-end',
     marginTop: 4,
   },
@@ -429,48 +470,40 @@ const styles = StyleSheet.create({
     color: '#667781',
   },
   composerContainer: {
-    backgroundColor: '#e5ddd5',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.08)',
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 8,
-    backgroundColor: '#e5ddd5',
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 6,
     alignItems: 'flex-end',
+    gap: 6,
   },
   input: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
-    minHeight: 40,
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 11,
+    paddingBottom: 11,
+    minHeight: 44,
     maxHeight: 100,
-    fontSize: 16,
+    fontSize: 15,
     borderWidth: 1,
-    borderColor: '#ddd',
   },
   attachButton: {
     width: 44,
     height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
   },
   sendButton: {
-    backgroundColor: '#00A884',
     width: 44,
     height: 44,
     borderRadius: 22,
-    marginLeft: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 0,
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#ccc',
   },
   previewContainer: {
     flex: 1,
@@ -537,25 +570,21 @@ const styles = StyleSheet.create({
   },
   inputActionPreview: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
     padding: 10,
-    marginHorizontal: 8,
-    marginTop: 8,
-    borderRadius: 10,
+    marginHorizontal: 12,
+    marginTop: 10,
+    borderRadius: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#00A884',
   },
   inputActionLeft: {
     flex: 1,
   },
   inputActionTitle: {
-    color: '#00A884',
     fontSize: 12,
     fontWeight: 'bold',
     marginBottom: 2,
   },
   inputActionContent: {
-    color: '#666',
     fontSize: 14,
   },
   inputActionClose: {
@@ -585,20 +614,15 @@ const styles = StyleSheet.create({
   },
   dateHeaderContainer: {
     alignSelf: 'center',
-    backgroundColor: '#E1F3FB', // Light blue date header like WhatsApp
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginVertical: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginVertical: 10,
   },
   dateHeaderText: {
-    color: '#555',
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
 });

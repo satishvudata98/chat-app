@@ -1,11 +1,10 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { useEffect } from 'react';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { UserProvider, useUser } from '../store/UserContext';
+import { ThemePreferenceProvider, useAppTheme } from '../store/ThemeContext';
 import { View, ActivityIndicator } from 'react-native';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useLinkCurrentDeviceToUser } from '../hooks/useDeviceProfile';
@@ -14,11 +13,8 @@ import { NativeUpdatePrompt } from '../components/NativeUpdatePrompt';
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL || "https://example.convex.cloud");
 
 function AuthState() {
-  const { userId, isLoading } = useUser();
-  const segments = useSegments();
-  const router = useRouter();
+  const { isLoading } = useUser();
   
-  // Initialize push notifications tracking
   usePushNotifications();
   useLinkCurrentDeviceToUser();
 
@@ -40,17 +36,45 @@ function AuthState() {
   );
 }
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function AppShell() {
+  const { themeName, colors, isLoading } = useAppTheme();
+  const navigationTheme = {
+    ...(themeName === 'dark' ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(themeName === 'dark' ? DarkTheme.colors : DefaultTheme.colors),
+      primary: colors.primary,
+      background: colors.background,
+      card: colors.panel,
+      text: colors.text,
+      border: colors.border,
+      notification: colors.secondary,
+    },
+  };
 
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  return (
+    <ThemeProvider value={navigationTheme}>
+      <AuthState />
+      <NativeUpdatePrompt />
+      <StatusBar style={themeName === 'dark' ? 'light' : 'dark'} />
+    </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
   return (
     <ConvexProvider client={convex}>
       <UserProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <AuthState />
-          <NativeUpdatePrompt />
-          <StatusBar style="auto" />
-        </ThemeProvider>
+        <ThemePreferenceProvider>
+          <AppShell />
+        </ThemePreferenceProvider>
       </UserProvider>
     </ConvexProvider>
   );

@@ -5,24 +5,63 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+export type AppThemeName = 'light' | 'dark';
+
+export const AppTheme = {
+  light: {
+    background: '#FFFFFF',
+    chatBackground: '#EFEAE2',
+    panel: '#FFFFFF',
+    panelSoft: '#F0F2F5',
+    text: '#111B21',
+    textSecondary: '#667781',
+    border: '#E9EDEF',
+    primary: '#00A884',
+    primaryDark: '#008069',
+    secondary: '#25D366',
+    accent: '#53BDEB',
+    incomingBubble: '#FFFFFF',
+    outgoingBubble: '#D9FDD3',
+    outgoingText: '#111B21',
+    disabled: '#E9EDEF',
+  },
+  dark: {
+    background: '#0B141A',
+    chatBackground: '#0B141A',
+    panel: '#111B21',
+    panelSoft: '#1F2C34',
+    text: '#E9EDEF',
+    textSecondary: '#8696A0',
+    border: '#222E35',
+    primary: '#00A884',
+    primaryDark: '#005C4B',
+    secondary: '#25D366',
+    accent: '#53BDEB',
+    incomingBubble: '#1F2C34',
+    outgoingBubble: '#005C4B',
+    outgoingText: '#E9EDEF',
+    disabled: '#2A3942',
+  },
+};
+
+const tintColorLight = AppTheme.light.primary;
+const tintColorDark = AppTheme.dark.primary;
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
+    text: AppTheme.light.text,
+    background: AppTheme.light.background,
     tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
+    icon: AppTheme.light.textSecondary,
+    tabIconDefault: AppTheme.light.textSecondary,
     tabIconSelected: tintColorLight,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: AppTheme.dark.text,
+    background: AppTheme.dark.background,
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
+    icon: AppTheme.dark.textSecondary,
+    tabIconDefault: AppTheme.dark.textSecondary,
     tabIconSelected: tintColorDark,
   },
 };

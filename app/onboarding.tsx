@@ -7,12 +7,14 @@ import { useRouter } from 'expo-router';
 import { api } from '../convex/_generated/api';
 import { useUser } from '../store/UserContext';
 import { useDeviceProfileId } from '../hooks/useDeviceProfile';
+import { useAppTheme } from '../store/ThemeContext';
 
 export default function Onboarding() {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createNewProfile, setCreateNewProfile] = useState(false);
   const { setUserId } = useUser();
+  const { colors } = useAppTheme();
   const router = useRouter();
   const deviceId = useDeviceProfileId();
 
@@ -65,27 +67,27 @@ export default function Onboarding() {
 
   if (isCheckingDevice) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#00A884" />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   if (showRestoreProfile) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.restoreCard}>
-          <View style={styles.avatar}>
+          <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
             <Text style={styles.avatarText}>
               {existingProfile.name?.[0]?.toUpperCase() || '?'}
             </Text>
           </View>
 
-          <Text style={styles.title}>Welcome back</Text>
-          <Text style={styles.subtitle}>{existingProfile.name}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Welcome back</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{existingProfile.name}</Text>
 
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, { backgroundColor: colors.primary }]}
             onPress={handleRestoreProfile}
             disabled={isSubmitting}
           >
@@ -101,7 +103,7 @@ export default function Onboarding() {
             onPress={() => setCreateNewProfile(true)}
             disabled={isSubmitting}
           >
-            <Text style={styles.secondaryButtonText}>Create new profile</Text>
+            <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Create new profile</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -109,13 +111,21 @@ export default function Onboarding() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Welcome to ChatApp</Text>
-      <Text style={styles.subtitle}>Enter your name to get started.</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Welcome to ChatApp</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Enter your name to get started.</Text>
 
       <TextInput
-        style={styles.input}
+        style={[
+          styles.input,
+          {
+            backgroundColor: colors.panelSoft,
+            borderColor: colors.border,
+            color: colors.text,
+          },
+        ]}
         placeholder="Your Name"
+        placeholderTextColor={colors.textSecondary}
         value={name}
         onChangeText={setName}
         autoFocus
@@ -124,7 +134,7 @@ export default function Onboarding() {
       />
 
       <TouchableOpacity
-        style={[styles.button, !name.trim() && styles.buttonDisabled]}
+        style={[styles.button, { backgroundColor: name.trim() ? colors.primary : colors.disabled }]}
         onPress={handleCreateProfile}
         disabled={!name.trim() || isSubmitting}
       >
@@ -141,7 +151,7 @@ export default function Onboarding() {
           onPress={() => setCreateNewProfile(false)}
           disabled={isSubmitting}
         >
-          <Text style={styles.backButtonText}>Use existing profile</Text>
+          <Text style={[styles.backButtonText, { color: colors.primary }]}>Use existing profile</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -153,7 +163,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#fff',
   },
   restoreCard: {
     alignItems: 'center',
@@ -162,13 +171,12 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#E8F5F1',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
   },
   avatarText: {
-    color: '#00A884',
+    color: '#fff',
     fontSize: 30,
     fontWeight: 'bold',
   },
@@ -176,33 +184,25 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 8,
-    color: '#000',
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 32,
     textAlign: 'center',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     padding: 16,
     fontSize: 16,
     marginBottom: 24,
-    backgroundColor: '#f9f9f9',
   },
   button: {
-    backgroundColor: '#007AFF',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
     width: '100%',
-  },
-  buttonDisabled: {
-    backgroundColor: '#ccc',
   },
   buttonText: {
     color: '#fff',
@@ -216,7 +216,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   secondaryButtonText: {
-    color: '#007AFF',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -226,7 +225,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   backButtonText: {
-    color: '#007AFF',
     fontSize: 16,
     fontWeight: '600',
   },

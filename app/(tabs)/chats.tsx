@@ -1,17 +1,24 @@
-import React from 'react';
-import { Alert, View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, View, Text, TextInput, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
+import { Ionicons } from '@expo/vector-icons';
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useUser } from '../../store/UserContext';
+import { useAppTheme } from '../../store/ThemeContext';
 
 export default function ChatsScreen() {
   const router = useRouter();
   const { userId } = useUser();
+  const { colors } = useAppTheme();
+  const [searchText, setSearchText] = useState('');
   // @ts-ignore
-  const chats = useQuery(api.messages.listChats, userId ? { userId } : 'skip');
+  const chats = useQuery(
+    api.messages.listChats,
+    userId ? { userId, searchText: searchText.trim() || undefined } : 'skip',
+  );
   // @ts-ignore
   const archiveChatForUser = useMutation(api.messages.archiveChatForUser);
 
@@ -38,20 +45,33 @@ export default function ChatsScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.scanButton}
-        onPress={() => router.push('/scan')}
-      >
-        <Text style={styles.scanButtonText}>Scan QR to Chat</Text>
-      </TouchableOpacity>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.searchBox, { backgroundColor: colors.panelSoft }]}>
+        <Ionicons name="search" size={22} color={colors.textSecondary} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.text }]}
+          placeholder="Search"
+          placeholderTextColor={colors.textSecondary}
+          value={searchText}
+          onChangeText={setSearchText}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {searchText.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchText('')} style={styles.searchClear}>
+            <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {chats === undefined ? (
-        <Text style={styles.loading}>Loading chats...</Text>
+        <Text style={[styles.loading, { color: colors.textSecondary }]}>Loading chats...</Text>
       ) : chats.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No chats yet.</Text>
-          <Text style={styles.emptySubtext}>{"Scan a friend's QR code to start."}</Text>
+          <Text style={[styles.emptyText, { color: colors.text }]}>
+            {searchText.trim() ? 'No chats found.' : 'No chats yet.'}
+          </Text>
+          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>{"Scan a friend's QR code to start."}</Text>
         </View>
       ) : (
         <FlatList
@@ -62,29 +82,35 @@ export default function ChatsScreen() {
 
             return (
               <TouchableOpacity
-                style={[styles.chatItem, hasUnread && styles.unreadChatItem]}
+                style={[
+                  styles.chatItem,
+                  {
+                    backgroundColor: hasUnread ? colors.panelSoft : colors.background,
+                    borderBottomColor: colors.border,
+                  },
+                ]}
                 onPress={() => router.push(`/chat/${item._id}`)}
                 onLongPress={() =>
                   confirmArchiveChat(item._id, item.otherUser?.name || 'this user')
                 }
                 delayLongPress={300}
               >
-                {hasUnread && <View style={styles.unreadAccent} />}
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
+                {hasUnread && <View style={[styles.unreadAccent, { backgroundColor: colors.primary }]} />}
+                <View style={[styles.avatar, { backgroundColor: hasUnread ? colors.primaryDark : colors.panelSoft }]}>
+                  <Text style={[styles.avatarText, { color: hasUnread ? '#fff' : colors.primary }]}>
                     {item.otherUser?.name?.[0]?.toUpperCase() || '?'}
                   </Text>
                 </View>
                 <View style={styles.chatInfo}>
-                  <Text style={[styles.chatName, hasUnread && styles.unreadText]}>
+                  <Text style={[styles.chatName, { color: colors.text }, hasUnread && styles.unreadText]}>
                     {item.otherUser?.name || 'Unknown User'}
                   </Text>
-                  <Text style={[styles.lastMessage, hasUnread && styles.unreadText]} numberOfLines={1}>
+                  <Text style={[styles.lastMessage, { color: hasUnread ? colors.text : colors.textSecondary }, hasUnread && styles.unreadText]} numberOfLines={1}>
                     {item.lastMessage?.content || (item.lastMessage?.type === 'image' ? 'Image' : 'Start chatting')}
                   </Text>
                 </View>
                 {hasUnread && (
-                  <View style={styles.unreadDot} />
+                  <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />
                 )}
               </TouchableOpacity>
             );
@@ -100,17 +126,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  scanButton: {
-    backgroundColor: '#007AFF',
-    padding: 16,
-    margin: 16,
-    borderRadius: 8,
+  searchBox: {
+    minHeight: 48,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
-  scanButtonText: {
-    color: '#fff',
+  searchInput: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: '600',
+    paddingVertical: 10,
+  },
+  searchClear: {
+    padding: 4,
   },
   loading: {
     textAlign: 'center',
@@ -134,14 +167,11 @@ const styles = StyleSheet.create({
   },
   chatItem: {
     flexDirection: 'row',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
     alignItems: 'center',
     position: 'relative',
-  },
-  unreadChatItem: {
-    backgroundColor: '#F2FBF8',
   },
   unreadAccent: {
     position: 'absolute',
@@ -151,43 +181,38 @@ const styles = StyleSheet.create({
     width: 4,
     borderTopRightRadius: 4,
     borderBottomRightRadius: 4,
-    backgroundColor: '#00A884',
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#ddd',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
   },
   avatarText: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: 'bold',
-    color: '#555',
   },
   chatInfo: {
     flex: 1,
     marginRight: 12,
   },
   chatName: {
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: 'bold',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   lastMessage: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#666',
   },
   unreadText: {
     fontWeight: 'bold',
-    color: '#111',
   },
   unreadDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#00A884',
   },
 });

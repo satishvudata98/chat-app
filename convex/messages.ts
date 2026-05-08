@@ -70,9 +70,14 @@ async function enrichMessage(
   };
 }
 
-async function enrichChat(ctx: QueryCtx, chat: Doc<"chats">, userId: string) {
+async function enrichChat(
+  ctx: QueryCtx,
+  chat: Doc<"chats">,
+  userId: string,
+  existingOtherUser?: Doc<"users"> | null,
+) {
   const otherUserId = getOtherUserId(chat, userId);
-  const otherUser = await getUserByUserId(ctx, otherUserId);
+  const otherUser = existingOtherUser ?? await getUserByUserId(ctx, otherUserId);
 
   let lastMessage = null;
   if (chat.lastMessageId) {
@@ -96,8 +101,14 @@ async function enrichChat(ctx: QueryCtx, chat: Doc<"chats">, userId: string) {
 }
 
 export const listChats = query({
-  args: { userId: v.string() },
+  args: {
+    userId: v.string(),
+    searchText: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    const searchText = args.searchText?.trim().toLowerCase() ?? "";
+    const isSearching = searchText.length > 0;
+
     const chatsAsA = await ctx.db
       .query("chats")
       .withIndex("by_participantA_and_updatedAt", (q) =>
@@ -134,20 +145,37 @@ export const listChats = query({
       }
     }
 
-    const visibleChats = [];
+    const visibleChats: { chat: Doc<"chats">; otherUser?: Doc<"users"> | null }[] = [];
     for (const chat of chatMap.values()) {
       const archive = await getArchive(ctx, args.userId, chat._id);
-      if (archive && chat.updatedAt <= archive.archivedAt) {
+
+      if (archive && chat.updatedAt <= archive.archivedAt && !isSearching) {
         continue;
       }
-      visibleChats.push(chat);
+
+      if (isSearching) {
+        const otherUser = await getUserByUserId(ctx, getOtherUserId(chat, args.userId));
+        const searchableName = otherUser?.name?.toLowerCase() ?? "";
+        const searchableUserId = otherUser?.userId?.toLowerCase() ?? "";
+        if (
+          !searchableName.includes(searchText) &&
+          !searchableUserId.includes(searchText)
+        ) {
+          continue;
+        }
+
+        visibleChats.push({ chat, otherUser });
+        continue;
+      }
+
+      visibleChats.push({ chat });
     }
 
-    visibleChats.sort((a, b) => b.updatedAt - a.updatedAt);
+    visibleChats.sort((a, b) => b.chat.updatedAt - a.chat.updatedAt);
 
     return await Promise.all(
-      visibleChats.slice(0, CHAT_LIST_LIMIT).map((chat) =>
-        enrichChat(ctx, chat, args.userId),
+      visibleChats.slice(0, CHAT_LIST_LIMIT).map(({ chat, otherUser }) =>
+        enrichChat(ctx, chat, args.userId, otherUser),
       ),
     );
   },
