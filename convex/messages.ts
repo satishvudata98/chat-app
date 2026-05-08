@@ -45,6 +45,8 @@ async function enrichMessage(
   ctx: QueryCtx,
   message: Doc<"messages">,
   archiveCutoff: number,
+  viewerUserId: string,
+  otherUserLastReadAt?: number,
 ) {
   let url = null;
   if (message.fileId) {
@@ -67,6 +69,13 @@ async function enrichMessage(
     ...message,
     url,
     repliedMessage,
+    deliveryStatus:
+      message.senderId === viewerUserId
+        ? otherUserLastReadAt !== undefined &&
+          otherUserLastReadAt >= message._creationTime
+          ? "read"
+          : "sent"
+        : null,
   };
 }
 
@@ -260,6 +269,8 @@ export const getMessages = query({
 
     const archive = await getArchive(ctx, args.viewerUserId, args.chatId);
     const archiveCutoff = archive?.archivedAt ?? 0;
+    const otherUserId = getOtherUserId(chat, args.viewerUserId);
+    const otherUserLastReadAt = chat.lastReadAt?.[otherUserId];
 
     const page = await ctx.db
       .query("messages")
@@ -272,7 +283,15 @@ export const getMessages = query({
     return {
       ...page,
       page: await Promise.all(
-        page.page.map((message) => enrichMessage(ctx, message, archiveCutoff)),
+        page.page.map((message) =>
+          enrichMessage(
+            ctx,
+            message,
+            archiveCutoff,
+            args.viewerUserId,
+            otherUserLastReadAt,
+          ),
+        ),
       ),
     };
   },

@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useQuery, useMutation, usePaginatedQuery } from 'convex/react';
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
@@ -26,6 +27,7 @@ export default function ChatScreen() {
   const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
   const [optionsMessage, setOptionsMessage] = useState<any | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const lastMarkedReadKey = useRef<string | null>(null);
 
   // @ts-ignore
   const chatDetails = useQuery(
@@ -50,6 +52,7 @@ export default function ChatScreen() {
   const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
   // @ts-ignore
   const markChatRead = useMutation(api.messages.markChatRead);
+  const latestIncomingMessageId = messages.find((message: any) => message.senderId !== userId)?._id;
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -72,14 +75,31 @@ export default function ChatScreen() {
     navigation.setOptions({ title: chatDetails?.otherUser?.name || 'Chat' });
   }, [chatDetails?.otherUser?.name, navigation]);
 
-  useEffect(() => {
+  const markReadIfReady = useCallback(() => {
     if (!userId || !id || messageStatus === 'LoadingFirstPage') return;
+
+    const readKey = `${id}:${latestIncomingMessageId ?? 'none'}`;
+    if (lastMarkedReadKey.current === readKey) return;
+    lastMarkedReadKey.current = readKey;
 
     markChatRead({
       chatId: id as Id<"chats">,
       userId,
-    }).catch((e) => console.error("Failed to mark chat read", e));
-  }, [id, userId, messages.length, messageStatus, markChatRead]);
+    }).catch((e) => {
+      lastMarkedReadKey.current = null;
+      console.error("Failed to mark chat read", e);
+    });
+  }, [id, latestIncomingMessageId, markChatRead, messageStatus, userId]);
+
+  useEffect(() => {
+    markReadIfReady();
+  }, [markReadIfReady]);
+
+  useFocusEffect(
+    useCallback(() => {
+      markReadIfReady();
+    }, [markReadIfReady]),
+  );
 
   const handleSend = async () => {
     if (!text.trim() || !userId) return;
@@ -199,6 +219,7 @@ export default function ChatScreen() {
   const renderItem = ({ item, index }: { item: any, index: number }) => {
     const isMe = item.senderId === userId;
     const timeString = new Date(item._creationTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const tickColor = item.deliveryStatus === 'read' ? theme.accent : theme.textSecondary;
 
     let showDateHeader = false;
     if (index === reversedMessages.length - 1) {
@@ -252,6 +273,14 @@ export default function ChatScreen() {
               <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginTop: 0 }]}>
                 {timeString}
               </Text>
+              {isMe && (
+                <Ionicons
+                  name={item.deliveryStatus === 'read' ? 'checkmark-done' : 'checkmark'}
+                  size={14}
+                  color={tickColor}
+                  style={styles.messageTick}
+                />
+              )}
             </View>
           </View>
         </TouchableOpacity>
@@ -462,6 +491,10 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     alignSelf: 'flex-end',
     marginTop: 4,
+  },
+  messageTick: {
+    marginLeft: 2,
+    marginTop: 1,
   },
   myTimestamp: {
     color: '#667781',
