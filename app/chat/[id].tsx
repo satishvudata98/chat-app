@@ -1,20 +1,124 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { useQuery, useMutation, usePaginatedQuery } from 'convex/react';
+import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+import * as ImagePicker from 'expo-image-picker';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
-import { useUser } from '../../store/UserContext';
 import { Id } from '../../convex/_generated/dataModel';
 import { useAppTheme } from '../../store/ThemeContext';
+import { useUser } from '../../store/UserContext';
+
+const REPLY_SWIPE_THRESHOLD = 64;
+const REPLY_SWIPE_MAX_OFFSET = 76;
+
+function getCallMessageLabel(message: any, viewerUserId?: string | null) {
+  const mode = message.callMode === 'video' ? 'video' : 'audio';
+  const modeLabel = mode === 'video' ? 'video' : 'audio';
+  const isMe = message.senderId === viewerUserId;
+
+  switch (message.callStatus) {
+    case 'missed':
+      return isMe ? `Unanswered ${modeLabel} call` : `Missed ${modeLabel} call`;
+    case 'declined':
+      return `Declined ${modeLabel} call`;
+    case 'failed':
+      return `Failed ${modeLabel} call`;
+    default:
+      return isMe ? `Outgoing ${modeLabel} call` : `Incoming ${modeLabel} call`;
+  }
+}
+
+function getCallMessageIcon(message: any): keyof typeof Ionicons.glyphMap {
+  return message.callMode === 'video' ? 'videocam' : 'call';
+}
+
+function SwipeReplyMessage({
+  children,
+  iconColor,
+  iconBackgroundColor,
+  onReply,
+}: {
+  children: ReactNode;
+  iconColor: string;
+  iconBackgroundColor: string;
+  onReply: () => void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const iconOpacity = translateX.interpolate({
+    inputRange: [0, 18, 44],
+    outputRange: [0, 0.2, 1],
+    extrapolate: "clamp",
+  });
+  const iconTranslateX = translateX.interpolate({
+    inputRange: [0, REPLY_SWIPE_MAX_OFFSET],
+    outputRange: [-44, 0],
+    extrapolate: "clamp",
+  });
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          gestureState.dx > 10 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2,
+        onPanResponderMove: (_, gestureState) => {
+          if (gestureState.dx <= 0) return;
+          translateX.setValue(Math.min(gestureState.dx * 0.45, REPLY_SWIPE_MAX_OFFSET));
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx >= REPLY_SWIPE_THRESHOLD) {
+            onReply();
+          }
+
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 7,
+            tension: 80,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 7,
+            tension: 80,
+          }).start();
+        },
+      }),
+    [onReply, translateX],
+  );
+
+  return (
+    <View style={styles.swipeReplyRow} {...panResponder.panHandlers}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.swipeReplyIcon,
+          {
+            backgroundColor: iconBackgroundColor,
+            opacity: iconOpacity,
+            transform: [{ translateX: iconTranslateX }],
+          },
+        ]}
+      >
+        <Ionicons name="return-up-back" size={18} color={iconColor} />
+      </Animated.View>
+      <Animated.View style={{ transform: [{ translateX }] }}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
+  const router = useRouter();
   const { colors: theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { userId } = useUser();
@@ -52,7 +156,28 @@ export default function ChatScreen() {
   const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
   // @ts-ignore
   const markChatRead = useMutation(api.messages.markChatRead);
+  // @ts-ignore
+  const startCall = useMutation(api.calls.startCall);
   const latestIncomingMessageId = messages.find((message: any) => message.senderId !== userId)?._id;
+
+  const handleStartCall = useCallback(
+    async (mode: "audio" | "video") => {
+      if (!userId || !id) return;
+
+      try {
+        const callId = await startCall({
+          chatId: id as Id<"chats">,
+          callerId: userId,
+          mode,
+        });
+        router.push(`/call/${callId}` as any);
+      } catch (error) {
+        console.error("Failed to start call", error);
+        Alert.alert("Could not start call", "Please try again.");
+      }
+    },
+    [id, router, startCall, userId],
+  );
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -72,8 +197,28 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    navigation.setOptions({ title: chatDetails?.otherUser?.name || 'Chat' });
-  }, [chatDetails?.otherUser?.name, navigation]);
+    navigation.setOptions({
+      title: chatDetails?.otherUser?.name || 'Chat',
+      headerRight: () => (
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => handleStartCall("audio")}
+            disabled={!chatDetails?.otherUser}
+          >
+            <Ionicons name="call-outline" size={22} color={theme.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => handleStartCall("video")}
+            disabled={!chatDetails?.otherUser}
+          >
+            <Ionicons name="videocam-outline" size={23} color={theme.primary} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [chatDetails?.otherUser, handleStartCall, navigation, theme.primary]);
 
   const markReadIfReady = useCallback(() => {
     if (!userId || !id || messageStatus === 'LoadingFirstPage') return;
@@ -131,6 +276,7 @@ export default function ChatScreen() {
   };
 
   const handleLongPress = (item: any) => {
+    if (item.type === 'call') return;
     setOptionsMessage(item);
   };
 
@@ -139,6 +285,13 @@ export default function ChatScreen() {
     setEditingMessageId(null);
     setOptionsMessage(null);
   };
+
+  const handleSwipeReply = useCallback((message: any) => {
+    if (message.type === 'call') return;
+    setReplyingToMessage(message);
+    setEditingMessageId(null);
+    setOptionsMessage(null);
+  }, []);
 
   const handleEdit = () => {
     setText(optionsMessage.content);
@@ -213,7 +366,7 @@ export default function ChatScreen() {
   };
 
   const reversedMessages = messages;
-  const keyboardCushion = keyboardHeight > 0 ? 8 : 0;
+  const keyboardCushion = keyboardHeight > 0 ? 10 : 0;
   const composerBottomOffset = Math.max(keyboardHeight - insets.bottom + keyboardCushion, 0);
 
   const renderItem = ({ item, index }: { item: any, index: number }) => {
@@ -232,12 +385,23 @@ export default function ChatScreen() {
       }
     }
 
-    return (
-      <View>
-        <TouchableOpacity onLongPress={() => handleLongPress(item)} activeOpacity={0.8} delayLongPress={250}>
+    const dateHeader = showDateHeader ? (
+      <View style={[styles.dateHeaderContainer, { backgroundColor: theme.panel }]}>
+        <Text style={[styles.dateHeaderText, { color: theme.textSecondary }]}>{formatDate(item._creationTime)}</Text>
+      </View>
+    ) : null;
+
+    if (item.type === 'call') {
+      const isProblemStatus = item.callStatus === 'missed' || item.callStatus === 'declined' || item.callStatus === 'failed';
+      const callColor = isProblemStatus ? '#D14343' : theme.primary;
+      const callTextColor = isMe ? theme.outgoingText : theme.text;
+      const callSecondaryColor = isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary;
+
+      return (
+        <View>
           <View
             style={[
-              styles.messageBubble,
+              styles.callMessageBubble,
               isMe ? styles.myMessage : styles.theirMessage,
               {
                 backgroundColor: isMe ? theme.outgoingBubble : theme.incomingBubble,
@@ -245,51 +409,83 @@ export default function ChatScreen() {
               },
             ]}
           >
-            {item.repliedMessage && (
-              <View style={[styles.replyPreviewBubble, { borderLeftColor: theme.primary }]}>
-                <Text style={[styles.replyPreviewText, { color: isMe ? 'rgba(255,255,255,0.84)' : theme.textSecondary }]} numberOfLines={2}>{item.repliedMessage.content}</Text>
-              </View>
-            )}
-
-            {item.type === 'text' ? (
-              <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
-                {item.content}
+            <View style={[styles.callMessageIcon, { backgroundColor: isMe ? 'rgba(255,255,255,0.16)' : theme.panelSoft }]}>
+              <Ionicons name={getCallMessageIcon(item)} size={17} color={callColor} />
+            </View>
+            <View style={styles.callMessageTextBlock}>
+              <Text style={[styles.callMessageTitle, { color: callTextColor }]} numberOfLines={1}>
+                {getCallMessageLabel(item, userId)}
               </Text>
-            ) : item.url ? (
-              <TouchableOpacity onPress={() => setViewingImage(item.url)} activeOpacity={0.8}>
-                <Image source={{ uri: item.url }} style={{ width: 220, height: 220, borderRadius: 8, marginBottom: 4 }} resizeMode="cover" />
-                {item.content ? (
-                  <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
-                    {item.content}
-                  </Text>
-                ) : null}
-              </TouchableOpacity>
-            ) : (
-              <Text style={[styles.messageText, { color: theme.text }]}>Loading image...</Text>
-            )}
-
-            <View style={{ flexDirection: 'row', alignSelf: 'flex-end', marginTop: 4, alignItems: 'center' }}>
-              {item.isEdited && <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginRight: 4 }]}>Edited</Text>}
-              <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginTop: 0 }]}>
+              <Text style={[styles.timestamp, { color: callSecondaryColor, marginTop: 1 }]}>
                 {timeString}
               </Text>
-              {isMe && (
-                <Ionicons
-                  name={item.deliveryStatus === 'read' ? 'checkmark-done' : 'checkmark'}
-                  size={14}
-                  color={tickColor}
-                  style={styles.messageTick}
-                />
-              )}
             </View>
           </View>
-        </TouchableOpacity>
+          {dateHeader}
+        </View>
+      );
+    }
 
-        {showDateHeader && (
-          <View style={[styles.dateHeaderContainer, { backgroundColor: theme.panel }]}>
-            <Text style={[styles.dateHeaderText, { color: theme.textSecondary }]}>{formatDate(item._creationTime)}</Text>
-          </View>
-        )}
+    return (
+      <View>
+        <SwipeReplyMessage
+          iconColor={theme.primary}
+          iconBackgroundColor={theme.panel}
+          onReply={() => handleSwipeReply(item)}
+        >
+          <TouchableOpacity onLongPress={() => handleLongPress(item)} activeOpacity={0.8} delayLongPress={250}>
+            <View
+              style={[
+                styles.messageBubble,
+                isMe ? styles.myMessage : styles.theirMessage,
+                {
+                  backgroundColor: isMe ? theme.outgoingBubble : theme.incomingBubble,
+                  borderColor: isMe ? theme.outgoingBubble : theme.incomingBubble,
+                },
+              ]}
+            >
+              {item.repliedMessage && (
+                <View style={[styles.replyPreviewBubble, { borderLeftColor: theme.primary }]}>
+                  <Text style={[styles.replyPreviewText, { color: isMe ? 'rgba(255,255,255,0.84)' : theme.textSecondary }]} numberOfLines={2}>{item.repliedMessage.content}</Text>
+                </View>
+              )}
+
+              {item.type === 'text' ? (
+                <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
+                  {item.content}
+                </Text>
+              ) : item.url ? (
+                <TouchableOpacity onPress={() => setViewingImage(item.url)} activeOpacity={0.8}>
+                  <Image source={{ uri: item.url }} style={{ width: 220, height: 220, borderRadius: 8, marginBottom: 4 }} resizeMode="cover" />
+                  {item.content ? (
+                    <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
+                      {item.content}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              ) : (
+                <Text style={[styles.messageText, { color: theme.text }]}>Loading image...</Text>
+              )}
+
+              <View style={{ flexDirection: 'row', alignSelf: 'flex-end', marginTop: 4, alignItems: 'center' }}>
+                {item.isEdited && <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginRight: 4 }]}>Edited</Text>}
+                <Text style={[styles.timestamp, { color: isMe ? 'rgba(255,255,255,0.78)' : theme.textSecondary, marginTop: 0 }]}>
+                  {timeString}
+                </Text>
+                {isMe && (
+                  <Ionicons
+                    name={item.deliveryStatus === 'read' ? 'checkmark-done' : 'checkmark'}
+                    size={14}
+                    color={tickColor}
+                    style={styles.messageTick}
+                  />
+                )}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </SwipeReplyMessage>
+
+        {dateHeader}
       </View>
     );
   };
@@ -333,7 +529,7 @@ export default function ChatScreen() {
               {editingMessageId ? 'Editing Message' : 'Replying to message'}
             </Text>
             <Text style={[styles.inputActionContent, { color: theme.textSecondary }]} numberOfLines={1}>
-              {editingMessageId ? text : (replyingToMessage.type === 'image' ? 'Image' : replyingToMessage.content)}
+              {editingMessageId ? text : (replyingToMessage.type === 'image' ? 'Image' : replyingToMessage.type === 'call' ? getCallMessageLabel(replyingToMessage, userId) : replyingToMessage.content)}
             </Text>
           </View>
           <TouchableOpacity
@@ -458,6 +654,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingRight: 4,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   messagesContainer: {
     paddingHorizontal: 10,
     paddingTop: 8,
@@ -465,6 +673,20 @@ const styles = StyleSheet.create({
   },
   loadingMore: {
     paddingVertical: 12,
+  },
+  swipeReplyRow: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  swipeReplyIcon: {
+    position: 'absolute',
+    top: 12,
+    left: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   messageBubble: {
     maxWidth: '82%',
@@ -495,6 +717,34 @@ const styles = StyleSheet.create({
   messageTick: {
     marginLeft: 2,
     marginTop: 1,
+  },
+  callMessageBubble: {
+    maxWidth: '76%',
+    minHeight: 46,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 7,
+    marginBottom: 3,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  callMessageIcon: {
+    width: 31,
+    height: 31,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callMessageTextBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  callMessageTitle: {
+    fontSize: 14.5,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   myTimestamp: {
     color: '#667781',

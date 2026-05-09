@@ -9,6 +9,8 @@
  */
 
 import type * as appConfig from "../appConfig.js";
+import type * as calls from "../calls.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as push from "../push.js";
@@ -22,6 +24,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   appConfig: typeof appConfig;
+  calls: typeof calls;
+  crons: typeof crons;
   http: typeof http;
   messages: typeof messages;
   push: typeof push;

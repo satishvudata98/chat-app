@@ -35,13 +35,61 @@ export default defineSchema({
   messages: defineTable({
     chatId: v.id("chats"),
     senderId: v.string(), // userId of sender
-    type: v.union(v.literal("text"), v.literal("image")),
+    type: v.union(v.literal("text"), v.literal("image"), v.literal("call")),
     content: v.string(), // text content or empty string for image
     fileId: v.optional(v.id("_storage")),
     isRead: v.boolean(),
     isEdited: v.optional(v.boolean()),
     replyToId: v.optional(v.id("messages")),
+    callId: v.optional(v.id("calls")),
+    callMode: v.optional(v.union(v.literal("audio"), v.literal("video"))),
+    callStatus: v.optional(v.union(
+      v.literal("ringing"),
+      v.literal("accepted"),
+      v.literal("declined"),
+      v.literal("ended"),
+      v.literal("missed"),
+      v.literal("failed"),
+    )),
   }).index("by_chatId", ["chatId"]),
+
+  calls: defineTable({
+    chatId: v.id("chats"),
+    callerId: v.string(),
+    calleeId: v.string(),
+    participants: v.array(v.string()),
+    mode: v.union(v.literal("audio"), v.literal("video")),
+    status: v.union(
+      v.literal("ringing"),
+      v.literal("accepted"),
+      v.literal("declined"),
+      v.literal("ended"),
+      v.literal("missed"),
+      v.literal("failed"),
+    ),
+    startedAt: v.number(),
+    acceptedAt: v.optional(v.number()),
+    endedAt: v.optional(v.number()),
+    endedBy: v.optional(v.string()),
+    callMessageId: v.optional(v.id("messages")),
+  })
+    .index("by_chatId_and_startedAt", ["chatId", "startedAt"])
+    .index("by_calleeId_and_status", ["calleeId", "status"])
+    .index("by_callerId_and_status", ["callerId", "status"]),
+
+  callSignals: defineTable({
+    callId: v.id("calls"),
+    senderId: v.string(),
+    type: v.union(
+      v.literal("offer"),
+      v.literal("answer"),
+      v.literal("ice-candidate"),
+    ),
+    payload: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_callId", ["callId"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   appConfig: defineTable({
     key: v.string(),

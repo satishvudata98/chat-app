@@ -9,6 +9,29 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { useUser } from '../../store/UserContext';
 import { useAppTheme } from '../../store/ThemeContext';
 
+function getCallPreview(message: any, viewerUserId?: string | null) {
+  const modeLabel = message.callMode === 'video' ? 'Video' : 'Audio';
+  const isMe = message.senderId === viewerUserId;
+
+  switch (message.callStatus) {
+    case 'missed':
+      return isMe ? `Unanswered ${modeLabel.toLowerCase()} call` : `Missed ${modeLabel.toLowerCase()} call`;
+    case 'declined':
+      return `Declined ${modeLabel.toLowerCase()} call`;
+    case 'failed':
+      return `Failed ${modeLabel.toLowerCase()} call`;
+    default:
+      return isMe ? `Outgoing ${modeLabel.toLowerCase()} call` : `Incoming ${modeLabel.toLowerCase()} call`;
+  }
+}
+
+function getLastMessagePreview(message: any, viewerUserId?: string | null) {
+  if (!message) return 'Start chatting';
+  if (message.type === 'call') return getCallPreview(message, viewerUserId);
+  if (message.type === 'image') return message.content || 'Image';
+  return message.content || 'Start chatting';
+}
+
 export default function ChatsScreen() {
   const router = useRouter();
   const { userId } = useUser();
@@ -106,7 +129,7 @@ export default function ChatsScreen() {
                     {item.otherUser?.name || 'Unknown User'}
                   </Text>
                   <Text style={[styles.lastMessage, { color: hasUnread ? colors.text : colors.textSecondary }, hasUnread && styles.unreadText]} numberOfLines={1}>
-                    {item.lastMessage?.content || (item.lastMessage?.type === 'image' ? 'Image' : 'Start chatting')}
+                    {getLastMessagePreview(item.lastMessage, userId)}
                   </Text>
                 </View>
                 {hasUnread && (

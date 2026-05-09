@@ -34,6 +34,28 @@ export const getPushTokensForChat = internalQuery({
   },
 });
 
+export const getPushTokenForUser = internalQuery({
+  args: { userId: v.string(), callerId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .first();
+
+    const caller = await ctx.db
+      .query("users")
+      .withIndex("by_userId", (q) => q.eq("userId", args.callerId))
+      .first();
+
+    if (!user?.pushToken) return null;
+
+    return {
+      pushToken: user.pushToken,
+      callerName: caller?.name || "Someone",
+    };
+  },
+});
+
 export const sendPushNotification = internalAction({
   args: {
     chatId: v.id("chats"),
@@ -78,5 +100,57 @@ export const sendPushNotification = internalAction({
         }
       }
     }
+  },
+});
+
+export const sendCallNotification = internalAction({
+  args: {
+    callId: v.id("calls"),
+    chatId: v.id("chats"),
+    callerId: v.string(),
+    calleeId: v.string(),
+    mode: v.union(v.literal("audio"), v.literal("video")),
+  },
+  handler: async (ctx, args) => {
+    const recipient = await ctx.runQuery(internal.push.getPushTokenForUser, {
+      userId: args.calleeId,
+      callerId: args.callerId,
+    });
+
+    if (!recipient?.pushToken) return null;
+
+    try {
+      const response = await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Accept-encoding": "gzip, deflate",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: recipient.pushToken,
+          title: `${recipient.callerName} is calling`,
+          body: args.mode === "video" ? "Incoming video call" : "Incoming audio call",
+          sound: "default",
+          priority: "high",
+          channelId: "default",
+          data: {
+            type: "call",
+            callId: args.callId,
+            chatId: args.chatId,
+            mode: args.mode,
+          },
+        }),
+      });
+
+      const ticket = await response.json();
+      if (!response.ok || ticket.data?.status === "error") {
+        console.error("Expo call notification error", ticket);
+      }
+    } catch (error) {
+      console.error("Failed to send call notification", error);
+    }
+
+    return null;
   },
 });

@@ -60,7 +60,12 @@ async function enrichMessage(
       repliedMessage = {
         _id: rm._id,
         senderId: rm.senderId,
-        content: rm.type === "image" ? "Image" : rm.content,
+        content:
+          rm.type === "image"
+            ? "Image"
+            : rm.type === "call"
+              ? rm.content || "Call"
+              : rm.content,
       };
     }
   }

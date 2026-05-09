@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { useMutation } from 'convex/react';
+import { useRouter } from 'expo-router';
 // @ts-ignore
 import { api } from '../convex/_generated/api';
 import { useUser } from '../store/UserContext';
@@ -10,6 +11,7 @@ import { useUser } from '../store/UserContext';
 export function usePushNotifications() {
   const [expoPushToken, setExpoPushToken] = useState('');
   const { userId } = useUser();
+  const router = useRouter();
   // @ts-ignore
   const updatePushToken = useMutation(api.users.updatePushToken);
 
@@ -35,6 +37,17 @@ export function usePushNotifications() {
         }),
       });
 
+      const routeFromNotification = (notificationResponse: any) => {
+        const data = notificationResponse?.notification?.request?.content?.data;
+        if (data?.type === 'call' && typeof data.callId === 'string') {
+          router.push(`/call/${data.callId}` as any);
+          return;
+        }
+        if (typeof data?.chatId === 'string') {
+          router.push({ pathname: '/chat/[id]', params: { id: data.chatId } });
+        }
+      };
+
       registerForPushNotificationsAsync(Notifications)
         .then(token => {
           if (token) {
@@ -43,10 +56,23 @@ export function usePushNotifications() {
           }
         })
         .catch(console.error);
+
+      Notifications.getLastNotificationResponseAsync()
+        .then((response: any) => {
+          if (response) routeFromNotification(response);
+        })
+        .catch(console.error);
+
+      const responseSubscription =
+        Notifications.addNotificationResponseReceivedListener(routeFromNotification);
+
+      return () => {
+        responseSubscription.remove();
+      };
     } catch (e) {
       console.log("Expo notifications failed to load", e);
     }
-  }, [userId]);
+  }, [router, updatePushToken, userId]);
 
   return expoPushToken;
 }
