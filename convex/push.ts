@@ -87,6 +87,7 @@ export const sendPushNotification = internalAction({
               sound: "default",
               priority: "high",
               channelId: "default",
+              android: { tag: `chat_${chatId}` },
               data: { chatId },
             }),
           });
@@ -100,6 +101,9 @@ export const sendPushNotification = internalAction({
         }
       }
     }
+
+    // Clear the pending job ID from the chat now that we've sent
+    await ctx.runMutation(internal.messages.clearPendingNotifJob, { chatId });
   },
 });
 

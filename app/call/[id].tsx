@@ -1,13 +1,14 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { RTCView } from "react-native-webrtc";
 import { useMutation, useQuery } from "convex/react";
@@ -53,6 +54,35 @@ export default function CallScreen() {
     toggleSpeaker,
   } = useCallSession({ call, callId: id ? callId : null, userId });
 
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef(0);
+
+  useEffect(() => {
+    if (connectionState !== "connected") return;
+    elapsedRef.current = 0;
+    setElapsed(0);
+    const timer = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [connectionState]);
+
+  const formatDuration = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, "0");
+    const s = (secs % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  const activeCallStates = new Set(["ringing", "starting", "connecting", "connected"]);
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => activeCallStates.has(connectionState);
+      BackHandler.addEventListener("hardwareBackPress", onBackPress);
+      return () => BackHandler.removeEventListener("hardwareBackPress", onBackPress);
+    }, [connectionState])
+  );
+
   const isCaller = !!call && call.callerId === userId;
   const isIncomingRinging = !!call && call.status === "ringing" && !isCaller;
   const isVideo = call?.mode === "video";
@@ -81,11 +111,9 @@ export default function CallScreen() {
 
   const getStatusText = () => {
     if (!call) return "Loading call...";
-    if (call.status === "ringing") {
-      return isCaller ? "Ringing..." : "Incoming call";
-    }
+    if (call.status === "ringing") return isCaller ? "Ringing..." : "Incoming call";
     if (call.status === "accepted") {
-      if (connectionState === "connected") return "Connected";
+      if (connectionState === "connected") return `Connected • ${formatDuration(elapsed)}`;
       if (connectionState === "failed") return "Connection problem";
       return "Connecting...";
     }
@@ -114,103 +142,144 @@ export default function CallScreen() {
   const localStreamUrl = localStream?.toURL();
   const remoteStreamUrl = remoteStream?.toURL();
 
+  // During video call: remote fills screen, local goes to corner.
+  // While waiting (no remote yet): local fills screen so user sees their camera.
+  const showRemoteFullscreen = isVideo && !!remoteStreamUrl;
+  const showLocalFullscreen = isVideo && !!localStreamUrl && !remoteStreamUrl;
+  const showLocalCorner = isVideo && !!localStreamUrl && !!remoteStreamUrl;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.stage}>
-        {isVideo && remoteStreamUrl ? (
-          <RTCView
-            streamURL={remoteStreamUrl}
-            style={styles.remoteVideo}
-            objectFit="contain"
-          />
-        ) : (
-          <View style={styles.audioStage}>
-            <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-              <Text style={styles.avatarText}>
-                {call.otherUser?.name?.[0]?.toUpperCase() || "?"}
-              </Text>
-            </View>
-            <Text style={styles.nameText}>{call.otherUser?.name || "Unknown User"}</Text>
-            <Text style={styles.modeText}>{call.mode === "video" ? "Video call" : "Audio call"}</Text>
-          </View>
-        )}
+    <View style={styles.root}>
+      {/* Layer 0 — background video surfaces (native, use zOrder to stack) */}
+      {showRemoteFullscreen && (
+        <RTCView
+          streamURL={remoteStreamUrl!}
+          style={StyleSheet.absoluteFillObject}
+          objectFit="cover"
+          zOrder={0}
+        />
+      )}
+      {showLocalFullscreen && (
+        <RTCView
+          streamURL={localStreamUrl!}
+          style={StyleSheet.absoluteFillObject}
+          objectFit="cover"
+          zOrder={0}
+          mirror
+        />
+      )}
 
-        {isVideo && localStreamUrl && (
-          <View style={[styles.localPreview, { top: Math.max(insets.top + 44, 76) }]}>
-            <RTCView
-              streamURL={localStreamUrl}
-              style={styles.localVideo}
-              objectFit="cover"
-              mirror
-            />
+      {/* Audio call / non-video background */}
+      {!isVideo && (
+        <View style={styles.audioBackground}>
+          <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+            <Text style={styles.avatarText}>
+              {call.otherUser?.name?.[0]?.toUpperCase() || "?"}
+            </Text>
           </View>
-        )}
-
-        <View style={[styles.topBar, { top: Math.max(insets.top, 12) }]}>
-          <Text style={styles.statusText}>{getStatusText()}</Text>
-          {errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
+          <Text style={styles.nameText}>{call.otherUser?.name || "Unknown User"}</Text>
+          <Text style={styles.modeText}>Audio call</Text>
         </View>
+      )}
 
-        {isIncomingRinging ? (
-          <View style={[styles.incomingActions, { bottom: Math.max(insets.bottom + 22, 34) }]}>
-            <TouchableOpacity
-              style={[styles.roundButton, styles.declineButton]}
-              onPress={handleDecline}
-            >
-              <Ionicons name="call" size={28} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.roundButton, { backgroundColor: colors.primary }]}
-              onPress={handleAccept}
-            >
-              <Ionicons name="call" size={28} color="#fff" />
-            </TouchableOpacity>
+      {/* Video call waiting state: show name over local camera preview */}
+      {showLocalFullscreen && (
+        <View style={[styles.waitingOverlay, { paddingTop: Math.max(insets.top + 24, 48) }]}>
+          <Text style={styles.waitingName}>{call.otherUser?.name || "Unknown"}</Text>
+          <Text style={styles.waitingStatus}>{getStatusText()}</Text>
+        </View>
+      )}
+
+      {/* Local camera corner pip — zOrder={1} so it sits on top of remote video */}
+      {showLocalCorner && (
+        <View
+          style={[
+            styles.localCorner,
+            { bottom: Math.max(insets.bottom + 108, 126) },
+          ]}
+        >
+          <RTCView
+            streamURL={localStreamUrl!}
+            style={StyleSheet.absoluteFillObject}
+            objectFit="cover"
+            zOrder={1}
+            mirror
+          />
+        </View>
+      )}
+
+      {/* Top bar: status text */}
+      {(!showLocalFullscreen) && (
+        <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 16) }]}>
+          <Text style={styles.statusText}>{getStatusText()}</Text>
+          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+        </View>
+      )}
+
+      {/* Bottom controls */}
+      {isIncomingRinging ? (
+        <View style={[styles.incomingRow, { paddingBottom: Math.max(insets.bottom + 32, 48) }]}>
+          <View style={styles.incomingLabel}>
+            <Text style={styles.incomingName}>{call.otherUser?.name || "Unknown"}</Text>
+            <Text style={styles.incomingSubtitle}>
+              {call.mode === "video" ? "Incoming video call" : "Incoming audio call"}
+            </Text>
           </View>
-        ) : (
-          <View style={[styles.controls, { bottom: Math.max(insets.bottom + 12, 18) }]}>
-            <TouchableOpacity style={styles.controlButton} onPress={toggleMicrophone}>
-              <Ionicons name={isMuted ? "mic-off" : "mic"} size={24} color="#fff" />
-              <Text style={styles.controlLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.controlButton} onPress={toggleSpeaker}>
-              <Ionicons
-                name={isSpeakerOn ? "volume-high" : "volume-medium"}
-                size={24}
-                color="#fff"
-              />
-              <Text style={styles.controlLabel}>{isSpeakerOn ? "Speaker" : "Earpiece"}</Text>
-            </TouchableOpacity>
-
-            {isVideo && (
-              <TouchableOpacity style={styles.controlButton} onPress={toggleCamera}>
-                <Ionicons
-                  name={isCameraOff ? "videocam-off" : "videocam"}
-                  size={24}
-                  color="#fff"
-                />
-                <Text style={styles.controlLabel}>
-                  {isCameraOff ? "Camera on" : "Camera off"}
-                </Text>
+          <View style={styles.incomingButtons}>
+            <View style={styles.incomingBtnCol}>
+              <TouchableOpacity style={styles.declineBtn} onPress={handleDecline}>
+                <Ionicons name="call" size={30} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
               </TouchableOpacity>
-            )}
-
-            <TouchableOpacity
-              style={[styles.controlButton, styles.endButton]}
-              onPress={leaveCall}
-            >
-              <Ionicons name="call" size={24} color="#fff" />
-              <Text style={styles.controlLabel}>{isTerminal ? "Close" : "End"}</Text>
-            </TouchableOpacity>
+              <Text style={styles.incomingBtnLabel}>Decline</Text>
+            </View>
+            <View style={styles.incomingBtnCol}>
+              <TouchableOpacity style={[styles.acceptBtn, { backgroundColor: colors.primary }]} onPress={handleAccept}>
+                <Ionicons name="call" size={30} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.incomingBtnLabel}>Accept</Text>
+            </View>
           </View>
-        )}
-      </View>
-    </SafeAreaView>
+        </View>
+      ) : (
+        <View style={[styles.controls, { paddingBottom: Math.max(insets.bottom + 8, 20) }]}>
+          <TouchableOpacity
+            style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
+            onPress={toggleMicrophone}
+          >
+            <Ionicons name={isMuted ? "mic-off" : "mic"} size={24} color="#fff" />
+            <Text style={styles.controlLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.controlBtn, isSpeakerOn && styles.controlBtnActive]}
+            onPress={toggleSpeaker}
+          >
+            <Ionicons name={isSpeakerOn ? "volume-high" : "volume-medium"} size={24} color="#fff" />
+            <Text style={styles.controlLabel}>{isSpeakerOn ? "Speaker" : "Earpiece"}</Text>
+          </TouchableOpacity>
+
+          {isVideo && (
+            <TouchableOpacity
+              style={[styles.controlBtn, isCameraOff && styles.controlBtnActive]}
+              onPress={toggleCamera}
+            >
+              <Ionicons name={isCameraOff ? "videocam-off" : "videocam"} size={24} color="#fff" />
+              <Text style={styles.controlLabel}>{isCameraOff ? "Cam on" : "Cam off"}</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity style={styles.endBtn} onPress={leaveCall}>
+            <Ionicons name="call" size={26} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
+            <Text style={styles.controlLabel}>{isTerminal ? "Close" : "End"}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
     backgroundColor: "#070B0D",
   },
@@ -219,14 +288,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  stage: {
-    flex: 1,
-    backgroundColor: "#070B0D",
-  },
-  remoteVideo: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  audioStage: {
+  audioBackground: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -252,87 +314,164 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   modeText: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.65)",
     fontSize: 15,
     marginTop: 8,
   },
-  localPreview: {
+  // Local camera full-screen waiting state overlay
+  waitingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingHorizontal: 24,
+  },
+  waitingName: {
+    color: "#fff",
+    fontSize: 26,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  waitingStatus: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 16,
+    marginTop: 8,
+  },
+  // Local camera corner PiP
+  localCorner: {
     position: "absolute",
     right: 16,
-    width: 108,
-    height: 156,
-    overflow: "hidden",
+    width: 110,
+    height: 160,
     borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.35)",
     backgroundColor: "#111",
-    elevation: 8,
-    zIndex: 5,
+    // elevation and zIndex for the View container (non-native layer)
+    elevation: 10,
+    zIndex: 10,
   },
-  localVideo: {
-    flex: 1,
-  },
+  // Top status bar
   topBar: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    top: 0,
+    left: 0,
+    right: 0,
     alignItems: "center",
-    zIndex: 6,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    zIndex: 20,
   },
   statusText: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     textAlign: "center",
   },
   errorText: {
     color: "#FFB4AB",
     fontSize: 13,
-    marginTop: 6,
+    marginTop: 4,
     textAlign: "center",
   },
+  // Controls bar
   controls: {
     position: "absolute",
-    left: 12,
-    right: 12,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-  },
-  controlButton: {
-    flex: 1,
-    maxWidth: 86,
-    minHeight: 60,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    paddingHorizontal: 6,
-  },
-  endButton: {
-    backgroundColor: "#E53935",
-  },
-  controlLabel: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  incomingActions: {
-    position: "absolute",
+    bottom: 0,
     left: 0,
     right: 0,
     flexDirection: "row",
     justifyContent: "center",
-    gap: 46,
+    alignItems: "flex-end",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    zIndex: 20,
   },
-  roundButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  controlBtn: {
+    flex: 1,
+    maxWidth: 80,
+    minHeight: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    gap: 4,
+  },
+  controlBtnActive: {
+    backgroundColor: "rgba(255,255,255,0.35)",
+  },
+  endBtn: {
+    flex: 1,
+    maxWidth: 80,
+    minHeight: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: "#E53935",
+    gap: 4,
+  },
+  controlLabel: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  // Incoming call
+  incomingRow: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingTop: 24,
+    paddingHorizontal: 24,
+    zIndex: 20,
+  },
+  incomingLabel: {
+    alignItems: "center",
+    marginBottom: 32,
+  },
+  incomingName: {
+    color: "#fff",
+    fontSize: 26,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  incomingSubtitle: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 15,
+    marginTop: 6,
+  },
+  incomingButtons: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 64,
+  },
+  incomingBtnCol: {
+    alignItems: "center",
+    gap: 10,
+  },
+  declineBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#E53935",
     alignItems: "center",
     justifyContent: "center",
   },
-  declineButton: {
-    backgroundColor: "#E53935",
-    transform: [{ rotate: "135deg" }],
+  acceptBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  incomingBtnLabel: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    fontWeight: "600",
   },
 });

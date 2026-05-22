@@ -11,6 +11,7 @@ import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { useAppTheme } from '../../store/ThemeContext';
 import { useUser } from '../../store/UserContext';
+import { encryptMessage, decryptMessage } from '../../utils/crypto';
 
 const REPLY_SWIPE_THRESHOLD = 64;
 const REPLY_SWIPE_MAX_OFFSET = 76;
@@ -115,13 +116,39 @@ function SwipeReplyMessage({
   );
 }
 
+function MessageSkeleton({ theme }: { theme: any }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.85, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+      ]),
+    ).start();
+  }, [opacity]);
+  const rows = [
+    { isMe: false, width: '60%' },
+    { isMe: true, width: '45%' },
+    { isMe: false, width: '70%' },
+    { isMe: true, width: '50%' },
+    { isMe: false, width: '55%' },
+  ];
+  return (
+    <Animated.View style={{ opacity, flex: 1, padding: 12, gap: 10, justifyContent: 'flex-end' }}>
+      {rows.map((row, i) => (
+        <View key={i} style={{ alignSelf: row.isMe ? 'flex-end' : 'flex-start', width: row.width as any, height: 38, borderRadius: 8, backgroundColor: row.isMe ? theme.outgoingBubble : theme.incomingBubble, opacity: 0.5 }} />
+      ))}
+    </Animated.View>
+  );
+}
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
   const router = useRouter();
   const { colors: theme } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { userId } = useUser();
+  const { userId, privateKey } = useUser();
   const [text, setText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -138,6 +165,7 @@ export default function ChatScreen() {
     api.messages.getChatDetails,
     id && userId ? { chatId: id as Id<"chats">, userId } : 'skip',
   );
+  const otherPublicKey: string | null = (chatDetails as any)?.otherUser?.publicKey ?? null;
   // @ts-ignore
   const {
     results: messages,
@@ -148,10 +176,23 @@ export default function ChatScreen() {
     id && userId ? { chatId: id as Id<"chats">, viewerUserId: userId } : 'skip',
     { initialNumItems: 30 },
   );
+  const typingName = useQuery(
+    // @ts-ignore
+    api.typing.getTypingUsers,
+    id && userId ? { chatId: id as Id<"chats">, viewerUserId: userId } : 'skip',
+  );
+  // @ts-ignore
+  const setTypingMutation = useMutation(api.typing.setTyping);
+  // @ts-ignore
+  const clearTypingMutation = useMutation(api.typing.clearTyping);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // @ts-ignore
   const sendMessage = useMutation(api.messages.sendMessage);
   // @ts-ignore
   const editMessage = useMutation(api.messages.editMessage);
+  // @ts-ignore
+  const deleteMessage = useMutation(api.messages.deleteMessage);
   // @ts-ignore
   const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
   // @ts-ignore
@@ -243,14 +284,41 @@ export default function ChatScreen() {
   useFocusEffect(
     useCallback(() => {
       markReadIfReady();
+      // Dismiss stacked notifications for this chat when screen comes into focus
+      try {
+        const Notifications = require('expo-notifications');
+        Notifications.dismissAllNotificationsAsync().catch(() => {});
+      } catch {}
     }, [markReadIfReady]),
   );
+
+  const handleTyping = useCallback((value: string) => {
+    setText(value);
+    if (!userId || !id || editingMessageId) return;
+    // Debounce: only call setTyping once per 2s while user is typing
+    if (!typingTimeoutRef.current) {
+      setTypingMutation({ chatId: id as Id<"chats">, userId }).catch(() => {});
+    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+      clearTypingMutation({ chatId: id as Id<"chats">, userId }).catch(() => {});
+    }, 2000);
+  }, [userId, id, editingMessageId, setTypingMutation, clearTypingMutation]);
 
   const handleSend = async () => {
     if (!text.trim() || !userId) return;
 
-    const content = text.trim();
+    const rawContent = text.trim();
     setText('');
+    // Clear typing on send
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = null;
+    clearTypingMutation({ chatId: id as Id<"chats">, userId }).catch(() => {});
+
+    const otherPublicKey = (chatDetails as any)?.otherUser?.publicKey ?? null;
+    const canEncrypt = !!(otherPublicKey && privateKey);
+    const content = canEncrypt ? encryptMessage(rawContent, otherPublicKey, privateKey!) : rawContent;
 
     try {
       if (editingMessageId) {
@@ -258,6 +326,7 @@ export default function ChatScreen() {
           messageId: editingMessageId as Id<"messages">,
           senderId: userId!,
           content,
+          ...(canEncrypt ? { isEncrypted: true } : {}),
         });
         setEditingMessageId(null);
       } else {
@@ -267,11 +336,13 @@ export default function ChatScreen() {
           type: "text",
           content,
           replyToId: replyingToMessage?._id,
+          ...(canEncrypt ? { isEncrypted: true } : {}),
         });
         setReplyingToMessage(null);
       }
     } catch (e) {
       console.error("Failed to send/edit message", e);
+      Alert.alert('Error', editingMessageId ? 'Could not edit message. Please try again.' : 'Message failed to send. Please try again.');
     }
   };
 
@@ -294,10 +365,30 @@ export default function ChatScreen() {
   }, []);
 
   const handleEdit = () => {
-    setText(optionsMessage.content);
+    const rawContent = optionsMessage.isEncrypted && otherPublicKey && privateKey
+      ? (decryptMessage(optionsMessage.content, otherPublicKey, privateKey) ?? optionsMessage.content)
+      : optionsMessage.content;
+    setText(rawContent);
     setEditingMessageId(optionsMessage._id);
     setReplyingToMessage(null);
     setOptionsMessage(null);
+  };
+
+  const handleDelete = () => {
+    const msg = optionsMessage;
+    setOptionsMessage(null);
+    Alert.alert('Delete message', 'This message will be deleted for everyone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          deleteMessage({ messageId: msg._id, senderId: userId! }).catch(() => {
+            Alert.alert('Error', 'Could not delete message. Please try again.');
+          });
+        },
+      },
+    ]);
   };
 
   const pickImage = async () => {
@@ -341,7 +432,7 @@ export default function ChatScreen() {
       setCaption('');
     } catch (e) {
       console.error("Failed to upload image", e);
-      alert("Failed to upload image");
+      Alert.alert('Upload failed', 'Could not send image. Please try again.');
     } finally {
       setIsUploading(false);
     }
@@ -365,6 +456,7 @@ export default function ChatScreen() {
     }
   };
 
+  const isLoadingMessages = messageStatus === 'LoadingFirstPage';
   const reversedMessages = messages;
   const keyboardCushion = keyboardHeight > 0 ? 10 : 0;
   const composerBottomOffset = Math.max(keyboardHeight - insets.bottom + keyboardCushion, 0);
@@ -426,6 +518,17 @@ export default function ChatScreen() {
       );
     }
 
+    if (item.isDeleted) {
+      return (
+        <View>
+          <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.theirMessage, { backgroundColor: 'transparent', borderColor: theme.border }]}>
+            <Text style={{ color: theme.textSecondary, fontStyle: 'italic', fontSize: 14 }}>This message was deleted</Text>
+          </View>
+          {dateHeader}
+        </View>
+      );
+    }
+
     return (
       <View>
         <SwipeReplyMessage
@@ -446,13 +549,21 @@ export default function ChatScreen() {
             >
               {item.repliedMessage && (
                 <View style={[styles.replyPreviewBubble, { borderLeftColor: theme.primary }]}>
-                  <Text style={[styles.replyPreviewText, { color: isMe ? 'rgba(255,255,255,0.84)' : theme.textSecondary }]} numberOfLines={2}>{item.repliedMessage.content}</Text>
+                  <Text style={[styles.replyPreviewText, { color: isMe ? 'rgba(255,255,255,0.84)' : theme.textSecondary, fontStyle: item.repliedMessage.content == null ? 'italic' : 'normal' }]} numberOfLines={2}>
+                    {item.repliedMessage.content == null
+                      ? 'This message was deleted'
+                      : item.repliedMessage.isEncrypted && otherPublicKey && privateKey
+                        ? (decryptMessage(item.repliedMessage.content, otherPublicKey, privateKey) ?? item.repliedMessage.content)
+                        : item.repliedMessage.content}
+                  </Text>
                 </View>
               )}
 
               {item.type === 'text' ? (
                 <Text style={[styles.messageText, { color: isMe ? theme.outgoingText : theme.text }]}>
-                  {item.content}
+                  {item.isEncrypted && otherPublicKey && privateKey
+                    ? (decryptMessage(item.content, otherPublicKey, privateKey) ?? item.content)
+                    : item.content}
                 </Text>
               ) : item.url ? (
                 <TouchableOpacity onPress={() => setViewingImage(item.url)} activeOpacity={0.8}>
@@ -493,24 +604,28 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.chatBackground }]} edges={['bottom']}>
       <View style={[styles.container, { backgroundColor: theme.chatBackground }]}>
-      <FlatList
-        inverted
-        data={reversedMessages}
-        keyExtractor={(item) => item._id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.messagesContainer}
-        onEndReached={() => {
-          if (messageStatus === 'CanLoadMore') {
-            loadMore(30);
+      {isLoadingMessages ? (
+        <MessageSkeleton theme={theme} />
+      ) : (
+        <FlatList
+          inverted
+          data={reversedMessages}
+          keyExtractor={(item) => item._id}
+          renderItem={renderItem}
+          contentContainerStyle={styles.messagesContainer}
+          onEndReached={() => {
+            if (messageStatus === 'CanLoadMore') {
+              loadMore(30);
+            }
+          }}
+          onEndReachedThreshold={0.2}
+          ListFooterComponent={
+            messageStatus === 'LoadingMore' ? (
+              <ActivityIndicator color="#00A884" style={styles.loadingMore} />
+            ) : null
           }
-        }}
-        onEndReachedThreshold={0.2}
-        ListFooterComponent={
-          messageStatus === 'LoadingMore' ? (
-            <ActivityIndicator color="#00A884" style={styles.loadingMore} />
-          ) : null
-        }
-      />
+        />
+      )}
 
       <View
         style={[
@@ -522,6 +637,12 @@ export default function ChatScreen() {
           },
         ]}
       >
+      {!!typingName && (
+        <View style={[styles.typingBubble, { backgroundColor: theme.panelSoft }]}>
+          <Text style={[styles.typingText, { color: theme.textSecondary }]}>{typingName} is typing...</Text>
+        </View>
+      )}
+
       {(replyingToMessage || editingMessageId) && (
         <View style={[styles.inputActionPreview, { backgroundColor: theme.panelSoft, borderLeftColor: theme.primary }]}>
           <View style={styles.inputActionLeft}>
@@ -567,7 +688,7 @@ export default function ChatScreen() {
           placeholder="Type a message"
           placeholderTextColor={theme.textSecondary}
           value={text}
-          onChangeText={setText}
+          onChangeText={handleTyping}
           multiline
         />
         <TouchableOpacity
@@ -633,6 +754,11 @@ export default function ChatScreen() {
             {optionsMessage?.senderId === userId && optionsMessage?.type === 'text' && (Date.now() - optionsMessage?._creationTime < 600000) && (
               <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
                 <Text style={styles.optionText}>Edit</Text>
+              </TouchableOpacity>
+            )}
+            {optionsMessage?.senderId === userId && optionsMessage?.type !== 'call' && (
+              <TouchableOpacity style={styles.optionItem} onPress={handleDelete}>
+                <Text style={[styles.optionText, { color: '#E53935' }]}>Delete</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={[styles.optionItem, { borderBottomWidth: 0 }]} onPress={() => setOptionsMessage(null)}>
@@ -907,5 +1033,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
+  },
+  typingBubble: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginHorizontal: 12,
+    marginTop: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  typingText: {
+    fontSize: 13,
+    fontStyle: 'italic',
   },
 });

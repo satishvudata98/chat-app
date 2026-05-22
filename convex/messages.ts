@@ -1,12 +1,12 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 
 const CHAT_LIST_LIMIT = 100;
-const LEGACY_CHAT_SCAN_LIMIT = 1000;
+const EDIT_WINDOW_MS = 600_000; // 10 minutes
 
 function getPairFields(userA: string, userB: string) {
   const [participantA, participantB] = [userA, userB].sort();
@@ -28,19 +28,6 @@ async function getUserByUserId(ctx: QueryCtx | MutationCtx, userId: string) {
     .first();
 }
 
-async function getArchive(
-  ctx: QueryCtx | MutationCtx,
-  userId: string,
-  chatId: Id<"chats">,
-) {
-  return await ctx.db
-    .query("chatArchives")
-    .withIndex("by_userId_and_chatId", (q) =>
-      q.eq("userId", userId).eq("chatId", chatId),
-    )
-    .first();
-}
-
 async function enrichMessage(
   ctx: QueryCtx,
   message: Doc<"messages">,
@@ -48,6 +35,16 @@ async function enrichMessage(
   viewerUserId: string,
   otherUserLastReadAt?: number,
 ) {
+  if (message.isDeleted) {
+    return {
+      ...message,
+      content: "",
+      url: null,
+      repliedMessage: null,
+      deliveryStatus: null,
+    };
+  }
+
   let url = null;
   if (message.fileId) {
     url = await ctx.storage.getUrl(message.fileId);
@@ -60,8 +57,10 @@ async function enrichMessage(
       repliedMessage = {
         _id: rm._id,
         senderId: rm.senderId,
-        content:
-          rm.type === "image"
+        isEncrypted: rm.isEncrypted ?? false,
+        content: rm.isDeleted
+          ? null
+          : rm.type === "image"
             ? "Image"
             : rm.type === "call"
               ? rm.content || "Call"
@@ -139,29 +138,21 @@ export const listChats = query({
       .order("desc")
       .take(CHAT_LIST_LIMIT);
 
-    const legacyChats = await ctx.db
-      .query("chats")
-      .order("desc")
-      .take(LEGACY_CHAT_SCAN_LIMIT);
-
     const chatMap = new Map<Id<"chats">, Doc<"chats">>();
     for (const chat of [...chatsAsA, ...chatsAsB]) {
       chatMap.set(chat._id, chat);
     }
 
-    for (const chat of legacyChats) {
-      if (
-        !chat.pairKey &&
-        chat.participants.includes(args.userId) &&
-        chat.participants.length === 2
-      ) {
-        chatMap.set(chat._id, chat);
-      }
-    }
+    // Load all archives for this user in one query (fixes N+1)
+    const userArchives = await ctx.db
+      .query("chatArchives")
+      .withIndex("by_userId_and_chatId", (q) => q.eq("userId", args.userId))
+      .collect();
+    const archiveMap = new Map(userArchives.map((a) => [a.chatId.toString(), a]));
 
     const visibleChats: { chat: Doc<"chats">; otherUser?: Doc<"users"> | null }[] = [];
     for (const chat of chatMap.values()) {
-      const archive = await getArchive(ctx, args.userId, chat._id);
+      const archive = archiveMap.get(chat._id.toString());
 
       if (archive && chat.updatedAt <= archive.archivedAt && !isSearching) {
         continue;
@@ -224,23 +215,6 @@ export const getOrCreateChat = mutation({
 
     if (existingChat) return existingChat._id;
 
-    const legacyChats = await ctx.db
-      .query("chats")
-      .order("desc")
-      .take(LEGACY_CHAT_SCAN_LIMIT);
-    const legacyChat = legacyChats.find(
-      (chat) =>
-        !chat.pairKey &&
-        chat.participants.includes(args.myUserId) &&
-        chat.participants.includes(args.otherUserId) &&
-        chat.participants.length === 2,
-    );
-
-    if (legacyChat) {
-      await ctx.db.patch(legacyChat._id, pairFields);
-      return legacyChat._id;
-    }
-
     const now = Date.now();
 
     return await ctx.db.insert("chats", {
@@ -272,8 +246,13 @@ export const getMessages = query({
       throw new Error("User is not a chat participant");
     }
 
-    const archive = await getArchive(ctx, args.viewerUserId, args.chatId);
-    const archiveCutoff = archive?.archivedAt ?? 0;
+    const userArchives = await ctx.db
+      .query("chatArchives")
+      .withIndex("by_userId_and_chatId", (q) =>
+        q.eq("userId", args.viewerUserId).eq("chatId", args.chatId),
+      )
+      .first();
+    const archiveCutoff = userArchives?.archivedAt ?? 0;
     const otherUserId = getOtherUserId(chat, args.viewerUserId);
     const otherUserLastReadAt = chat.lastReadAt?.[otherUserId];
 
@@ -310,6 +289,7 @@ export const sendMessage = mutation({
     content: v.string(),
     fileId: v.optional(v.id("_storage")),
     replyToId: v.optional(v.id("messages")),
+    isEncrypted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const chat = await ctx.db.get(args.chatId);
@@ -326,6 +306,7 @@ export const sendMessage = mutation({
       fileId: args.fileId,
       isRead: false,
       replyToId: args.replyToId,
+      isEncrypted: args.isEncrypted,
     });
 
     const now = Date.now();
@@ -340,11 +321,26 @@ export const sendMessage = mutation({
           : (unreadCounts[participantId] ?? 0) + 1;
     }
 
+    // Cancel existing pending notification, reschedule with 3-second delay
+    if (chat.pendingNotifJobId) {
+      await ctx.scheduler.cancel(chat.pendingNotifJobId);
+    }
+    const pendingNotifJobId = await ctx.scheduler.runAfter(
+      3000,
+      internal.push.sendPushNotification,
+      {
+        chatId: args.chatId,
+        senderId: args.senderId,
+        messageContent: args.type === "image" ? "📷 Image" : args.isEncrypted ? "New message" : args.content,
+      },
+    );
+
     const patch: Partial<Doc<"chats">> = {
       lastMessageId: messageId,
       updatedAt: now,
       lastReadAt,
       unreadCounts,
+      pendingNotifJobId,
     };
 
     if (!chat.pairKey && chat.participants.length === 2) {
@@ -355,12 +351,6 @@ export const sendMessage = mutation({
     }
 
     await ctx.db.patch(args.chatId, patch);
-
-    await ctx.scheduler.runAfter(0, internal.push.sendPushNotification, {
-      chatId: args.chatId,
-      senderId: args.senderId,
-      messageContent: args.type === "image" ? "Image" : args.content,
-    });
 
     return messageId;
   },
@@ -378,6 +368,11 @@ export const markChatRead = mutation({
       throw new Error("User is not a chat participant");
     }
 
+    // Cancel pending notification — user is reading right now
+    if (chat.pendingNotifJobId) {
+      await ctx.scheduler.cancel(chat.pendingNotifJobId);
+    }
+
     const unreadCounts = { ...(chat.unreadCounts ?? {}) };
     unreadCounts[args.userId] = 0;
 
@@ -387,7 +382,16 @@ export const markChatRead = mutation({
         [args.userId]: Date.now(),
       },
       unreadCounts,
+      pendingNotifJobId: undefined,
     });
+  },
+});
+
+// Called by the push action after delivering the notification
+export const clearPendingNotifJob = internalMutation({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.chatId, { pendingNotifJobId: undefined });
   },
 });
 
@@ -404,9 +408,14 @@ export const archiveChatForUser = mutation({
     }
 
     const now = Date.now();
-    const archive = await getArchive(ctx, args.userId, args.chatId);
-    if (archive) {
-      await ctx.db.patch(archive._id, { archivedAt: now });
+    const userArchives = await ctx.db
+      .query("chatArchives")
+      .withIndex("by_userId_and_chatId", (q) =>
+        q.eq("userId", args.userId).eq("chatId", args.chatId),
+      )
+      .first();
+    if (userArchives) {
+      await ctx.db.patch(userArchives._id, { archivedAt: now });
     } else {
       await ctx.db.insert("chatArchives", {
         userId: args.userId,
@@ -433,20 +442,42 @@ export const editMessage = mutation({
     messageId: v.id("messages"),
     senderId: v.string(),
     content: v.string(),
+    isEncrypted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const message = await ctx.db.get(args.messageId);
     if (!message) throw new Error("Message not found");
     if (message.senderId !== args.senderId) throw new Error("Unauthorized");
     if (message.type !== "text") throw new Error("Cannot edit images");
+    if (message.isDeleted) throw new Error("Cannot edit a deleted message");
 
-    if (Date.now() - message._creationTime > 600000) {
+    if (Date.now() - message._creationTime > EDIT_WINDOW_MS) {
       throw new Error("Can only edit messages sent within the last 10 minutes");
     }
 
     await ctx.db.patch(args.messageId, {
       content: args.content,
       isEdited: true,
+      editedAt: Date.now(),
+      isEncrypted: args.isEncrypted,
+    });
+  },
+});
+
+export const deleteMessage = mutation({
+  args: {
+    messageId: v.id("messages"),
+    senderId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (!message) throw new Error("Message not found");
+    if (message.senderId !== args.senderId) throw new Error("Unauthorized");
+    if (message.type === "call") throw new Error("Cannot delete call records");
+
+    await ctx.db.patch(args.messageId, {
+      isDeleted: true,
+      content: "",
     });
   },
 });

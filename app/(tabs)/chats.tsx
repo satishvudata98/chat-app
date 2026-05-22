@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Alert, View, Text, TextInput, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, View, Text, TextInput, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,31 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useUser } from '../../store/UserContext';
 import { useAppTheme } from '../../store/ThemeContext';
+
+function ChatSkeleton({ colors }: { colors: any }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.9, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+      ]),
+    ).start();
+  }, [opacity]);
+  return (
+    <Animated.View style={{ opacity }}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <View key={i} style={[styles.chatItem, { borderBottomColor: colors.border }]}>
+          <View style={[styles.avatar, { backgroundColor: colors.panelSoft, marginRight: 16 }]} />
+          <View style={{ flex: 1, gap: 8 }}>
+            <View style={{ height: 14, width: '50%', borderRadius: 6, backgroundColor: colors.panelSoft }} />
+            <View style={{ height: 12, width: '75%', borderRadius: 6, backgroundColor: colors.panelSoft }} />
+          </View>
+        </View>
+      ))}
+    </Animated.View>
+  );
+}
 
 function getCallPreview(message: any, viewerUserId?: string | null) {
   const modeLabel = message.callMode === 'video' ? 'Video' : 'Audio';
@@ -88,7 +113,7 @@ export default function ChatsScreen() {
       </View>
 
       {chats === undefined ? (
-        <Text style={[styles.loading, { color: colors.textSecondary }]}>Loading chats...</Text>
+        <ChatSkeleton colors={colors} />
       ) : chats.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={[styles.emptyText, { color: colors.text }]}>

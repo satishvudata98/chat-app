@@ -10,4 +10,12 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "cleanup stale typing indicators",
+  { minutes: 5 },
+  // @ts-ignore — internal.typing is generated after `npx convex dev`
+  internal.typing.cleanupStaleTyping,
+  {},
+);
+
 export default crons;

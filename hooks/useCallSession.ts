@@ -34,9 +34,23 @@ type UseCallSessionArgs = {
   userId: string | null;
 };
 
-const rtcConfig = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-};
+type IceServer = { urls: string | string[]; username?: string; credential?: string };
+const iceServers: IceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+];
+
+// Add TURN relay if credentials are provided (prevents call failures on strict NAT networks)
+const turnUsername = process.env.EXPO_PUBLIC_TURN_USERNAME;
+const turnCredential = process.env.EXPO_PUBLIC_TURN_CREDENTIAL;
+if (turnUsername && turnCredential) {
+  iceServers.push(
+    { urls: "turn:relay.metered.ca:80", username: turnUsername, credential: turnCredential },
+    { urls: "turn:relay.metered.ca:443", username: turnUsername, credential: turnCredential },
+    { urls: "turns:relay.metered.ca:443", username: turnUsername, credential: turnCredential },
+  );
+}
+
+const rtcConfig = { iceServers };
 
 const terminalStatuses = new Set(["declined", "ended", "missed", "failed"]);
 
@@ -49,6 +63,7 @@ export function useCallSession({ call, callId, userId }: UseCallSessionArgs) {
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const peerConnectionRef = useRef<any>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const processedSignalIdsRef = useRef(new Set<string>());
@@ -237,10 +252,16 @@ export function useCallSession({ call, callId, userId }: UseCallSessionArgs) {
         if (processedSignalIdsRef.current.has(signal._id)) continue;
 
         processedSignalIdsRef.current.add(signal._id);
-        const payload = JSON.parse(signal.payload);
+        let payload: unknown;
+        try {
+          payload = JSON.parse(signal.payload);
+        } catch {
+          console.error("Malformed signal payload, skipping", signal._id);
+          continue;
+        }
 
         if (signal.type === "offer") {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(payload as any));
           const answer = await peerConnection.createAnswer();
           await peerConnection.setLocalDescription(answer);
           await sendPeerSignal("answer", answer);
@@ -253,7 +274,7 @@ export function useCallSession({ call, callId, userId }: UseCallSessionArgs) {
         }
 
         if (signal.type === "answer") {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(payload as any));
 
           while (pendingCandidatesRef.current.length > 0) {
             const candidate = pendingCandidatesRef.current.shift();
@@ -263,7 +284,7 @@ export function useCallSession({ call, callId, userId }: UseCallSessionArgs) {
         }
 
         if (signal.type === "ice-candidate") {
-          const candidate = new RTCIceCandidate(payload);
+          const candidate = new RTCIceCandidate(payload as any);
           if (peerConnection.remoteDescription) {
             await peerConnection.addIceCandidate(candidate);
           } else {

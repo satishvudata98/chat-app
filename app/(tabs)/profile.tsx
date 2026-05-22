@@ -1,10 +1,10 @@
-import React, { useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Share } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Alert, View, Text, TextInput, StyleSheet, TouchableOpacity, Share } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useUser } from '../../store/UserContext';
-import { useQuery } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
 import { useAppTheme } from '../../store/ThemeContext';
@@ -15,7 +15,11 @@ export default function ProfileScreen() {
   const { colors } = useAppTheme();
   // @ts-ignore
   const user = useQuery(api.users.getUser, userId ? { userId } : 'skip');
+  // @ts-ignore
+  const updateUser = useMutation(api.users.updateUser);
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
   const qrRef = useRef<any>(null);
 
   if (!userId || !user) {
@@ -25,29 +29,6 @@ export default function ProfileScreen() {
       </View>
     );
   }
-
-  /*
-  const shareQRCode = () => {
-    if (qrRef.current) {
-      qrRef.current.toDataURL(async (data: string) => {
-        try {
-          const filepath = FileSystem.cacheDirectory + 'qrcode.png';
-          await FileSystem.writeAsStringAsync(filepath, data, {
-            encoding: 'base64',
-          });
-          
-          await Sharing.shareAsync(filepath, {
-            mimeType: 'image/png',
-            dialogTitle: 'Share your ChatNext QR Code',
-            UTI: 'public.png',
-          });
-        } catch (error) {
-          console.error('Error sharing QR code:', error);
-        }
-      });
-    }
-  };
-  */
 
   const siteUrl = process.env.EXPO_PUBLIC_CONVEX_SITE_URL || 'https://dashing-chickadee-619.convex.site';
   const shareUrl = `${siteUrl}/add?id=${userId}`;
@@ -63,14 +44,57 @@ export default function ProfileScreen() {
     }
   };
 
+  const startEditing = () => {
+    setEditName(user.name);
+    setIsEditing(true);
+  };
+
+  const saveName = async () => {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      Alert.alert('Invalid name', 'Name cannot be empty.');
+      return;
+    }
+    try {
+      await updateUser({ userId, name: trimmed });
+      setIsEditing(false);
+    } catch {
+      Alert.alert('Error', 'Could not update name. Please try again.');
+    }
+  };
+
   const qrValue = `chatapp://user/${userId}`;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.card, { backgroundColor: colors.panel, borderColor: colors.border }]}>
-        <Text style={[styles.name, { color: colors.text }]}>{user.name}</Text>
+        {isEditing ? (
+          <View style={styles.editRow}>
+            <TextInput
+              style={[styles.editInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.panelSoft }]}
+              value={editName}
+              onChangeText={setEditName}
+              autoFocus
+              maxLength={40}
+              returnKeyType="done"
+              onSubmitEditing={saveName}
+            />
+            <TouchableOpacity onPress={saveName} style={[styles.editSave, { backgroundColor: colors.primary }]}>
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setIsEditing(false)} style={styles.editCancel}>
+              <Ionicons name="close" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.nameRow} onPress={startEditing} activeOpacity={0.7}>
+            <Text style={[styles.name, { color: colors.text }]}>{user.name}</Text>
+            <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} style={{ marginLeft: 8 }} />
+          </TouchableOpacity>
+        )}
+
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Scan to chat</Text>
-        
+
         <View style={[styles.qrContainer, { borderColor: colors.border }]}>
           <QRCode
             getRef={(c) => (qrRef.current = c)}
@@ -80,12 +104,6 @@ export default function ProfileScreen() {
             backgroundColor="white"
           />
         </View>
-
-        {/* 
-        <TouchableOpacity style={styles.shareButton} onPress={shareQRCode}>
-          <Text style={styles.shareButtonText}>Share QR Image</Text>
-        </TouchableOpacity>
-        */}
 
         <TouchableOpacity style={[styles.shareButton, styles.shareLinkButton, { borderColor: colors.primary }]} onPress={shareProfileLink}>
           <Text style={[styles.shareLinkButtonText, { color: colors.primary }]}>Share Profile Link</Text>
@@ -114,11 +132,39 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
+    width: '100%',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   name: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  editRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 4,
+    gap: 8,
+  },
+  editInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: 'bold',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  editSave: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  editCancel: {
+    padding: 4,
   },
   subtitle: {
     fontSize: 16,

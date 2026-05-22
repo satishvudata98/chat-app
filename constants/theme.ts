@@ -14,7 +14,7 @@ export const AppTheme = {
     panel: '#FFFFFF',
     panelSoft: '#F0F2F5',
     text: '#111B21',
-    textSecondary: '#667781',
+    textSecondary: '#54656F',
     border: '#E9EDEF',
     primary: '#00A884',
     primaryDark: '#008069',

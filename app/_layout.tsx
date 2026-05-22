@@ -5,17 +5,41 @@ import 'react-native-reanimated';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { UserProvider, useUser } from '../store/UserContext';
 import { ThemePreferenceProvider, useAppTheme } from '../store/ThemeContext';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useLinkCurrentDeviceToUser } from '../hooks/useDeviceProfile';
+import { useNetworkState } from '../hooks/useNetworkState';
 import { NativeUpdatePrompt } from '../components/NativeUpdatePrompt';
 import { IncomingCallModal } from '../components/IncomingCallModal';
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL || "https://example.convex.cloud");
 
+function OfflineBanner() {
+  const isOnline = useNetworkState();
+  if (isOnline) return null;
+  return (
+    <View style={offlineStyles.banner}>
+      <Text style={offlineStyles.text}>No internet connection</Text>
+    </View>
+  );
+}
+
+const offlineStyles = StyleSheet.create({
+  banner: {
+    backgroundColor: '#C62828',
+    paddingVertical: 6,
+    alignItems: 'center',
+  },
+  text: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+});
+
 function AuthState() {
   const { isLoading } = useUser();
-  
+
   usePushNotifications();
   useLinkCurrentDeviceToUser();
 
@@ -32,7 +56,7 @@ function AuthState() {
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="chat/[id]" options={{ headerShown: true, title: 'Chat' }} />
-      <Stack.Screen name="call/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="call/[id]" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="scan" options={{ presentation: 'modal', headerShown: true, title: 'Scan QR Code' }} />
     </Stack>
   );
@@ -63,6 +87,7 @@ function AppShell() {
 
   return (
     <ThemeProvider value={navigationTheme}>
+      <OfflineBanner />
       <AuthState />
       <IncomingCallModal />
       <NativeUpdatePrompt />

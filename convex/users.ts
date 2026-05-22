@@ -69,6 +69,39 @@ export const updateDeviceId = mutation({
   },
 });
 
+export const updateUser = mutation({
+  args: {
+    userId: v.string(),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const trimmed = args.name.trim();
+    if (!trimmed) throw new Error("Name cannot be empty");
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .first();
+    if (!user) throw new Error("User not found");
+    await ctx.db.patch(user._id, { name: trimmed });
+  },
+});
+
+export const storePublicKey = mutation({
+  args: {
+    userId: v.string(),
+    publicKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .first();
+    if (user) {
+      await ctx.db.patch(user._id, { publicKey: args.publicKey });
+    }
+  },
+});
+
 export const getUsersByDeviceId = query({
   args: { deviceId: v.string() },
   handler: async (ctx, args) => {

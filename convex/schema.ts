@@ -3,17 +3,18 @@ import { v } from "convex/values";
 
 export default defineSchema({
   users: defineTable({
-    userId: v.string(), // Local UUID generated on device
+    userId: v.string(),
     name: v.string(),
     avatarUrl: v.optional(v.string()),
     pushToken: v.optional(v.string()),
     deviceId: v.optional(v.string()),
+    publicKey: v.optional(v.string()),
   })
     .index("by_userId", ["userId"])
     .index("by_deviceId", ["deviceId"]),
 
   chats: defineTable({
-    participants: v.array(v.string()), // Array of userIds
+    participants: v.array(v.string()),
     participantA: v.optional(v.string()),
     participantB: v.optional(v.string()),
     pairKey: v.optional(v.string()),
@@ -21,6 +22,7 @@ export default defineSchema({
     updatedAt: v.number(),
     lastReadAt: v.optional(v.record(v.string(), v.number())),
     unreadCounts: v.optional(v.record(v.string(), v.number())),
+    pendingNotifJobId: v.optional(v.id("_scheduled_functions")),
   })
     .index("by_participantA_and_updatedAt", ["participantA", "updatedAt"])
     .index("by_participantB_and_updatedAt", ["participantB", "updatedAt"])
@@ -34,13 +36,16 @@ export default defineSchema({
 
   messages: defineTable({
     chatId: v.id("chats"),
-    senderId: v.string(), // userId of sender
+    senderId: v.string(),
     type: v.union(v.literal("text"), v.literal("image"), v.literal("call")),
-    content: v.string(), // text content or empty string for image
+    content: v.string(),
     fileId: v.optional(v.id("_storage")),
     isDeleted: v.optional(v.boolean()),
     isRead: v.boolean(),
+    isEncrypted: v.optional(v.boolean()),
     isEdited: v.optional(v.boolean()),
+    editedAt: v.optional(v.number()),
+    isDeleted: v.optional(v.boolean()),
     replyToId: v.optional(v.id("messages")),
     callId: v.optional(v.id("calls")),
     callMode: v.optional(v.union(v.literal("audio"), v.literal("video"))),
@@ -91,6 +96,14 @@ export default defineSchema({
   })
     .index("by_callId", ["callId"])
     .index("by_expiresAt", ["expiresAt"]),
+
+  typing: defineTable({
+    chatId: v.id("chats"),
+    userId: v.string(),
+    updatedAt: v.number(),
+  })
+    .index("by_chatId", ["chatId"])
+    .index("by_chatId_and_userId", ["chatId", "userId"]),
 
   appConfig: defineTable({
     key: v.string(),
