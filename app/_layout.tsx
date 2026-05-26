@@ -6,23 +6,6 @@ import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { UserProvider, useUser } from '../store/UserContext';
 import { ThemePreferenceProvider, useAppTheme } from '../store/ThemeContext';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
-import React, { Component, ReactNode } from 'react';
-
-class ScreenErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: Error) { console.error('Screen error caught by boundary:', error); }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <Text style={{ fontSize: 16, textAlign: 'center', color: '#666' }}>Something went wrong. Please go back and try again.</Text>
-        </View>
-      );
-    }
-    return this.props.children;
-  }
-}
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useLinkCurrentDeviceToUser } from '../hooks/useDeviceProfile';
 import { useNetworkState } from '../hooks/useNetworkState';
@@ -69,15 +52,13 @@ function AuthState() {
   }
 
   return (
-    <ScreenErrorBoundary>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="chat/[id]" options={{ headerShown: true, title: 'Chat' }} />
-        <Stack.Screen name="call/[id]" options={{ headerShown: false, gestureEnabled: false }} />
-        <Stack.Screen name="scan" options={{ presentation: 'modal', headerShown: true, title: 'Scan QR Code' }} />
-      </Stack>
-    </ScreenErrorBoundary>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="chat/[id]" options={{ headerShown: true, title: 'Chat' }} />
+      <Stack.Screen name="call/[id]" options={{ headerShown: false, gestureEnabled: false }} />
+      <Stack.Screen name="scan" options={{ presentation: 'modal', headerShown: true, title: 'Scan QR Code' }} />
+    </Stack>
   );
 }
 

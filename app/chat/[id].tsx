@@ -2,10 +2,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import * as ImagePicker from 'expo-image-picker';
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { ErrorBoundaryProps, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
+export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
+  const router = useRouter();
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 }}>
+      <Text style={{ fontSize: 16, textAlign: 'center', color: '#666' }}>
+        Could not load this chat. Please go back and try again.
+      </Text>
+      <TouchableOpacity onPress={retry} style={{ paddingHorizontal: 24, paddingVertical: 10, backgroundColor: '#00A884', borderRadius: 8 }}>
+        <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.back()}>
+        <Text style={{ color: '#00A884', fontSize: 14 }}>Go back</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 // @ts-ignore
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
