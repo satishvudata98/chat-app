@@ -38,6 +38,7 @@ export default defineSchema({
     type: v.union(v.literal("text"), v.literal("image"), v.literal("call")),
     content: v.string(), // text content or empty string for image
     fileId: v.optional(v.id("_storage")),
+    isDeleted: v.optional(v.boolean()),
     isRead: v.boolean(),
     isEdited: v.optional(v.boolean()),
     replyToId: v.optional(v.id("messages")),
