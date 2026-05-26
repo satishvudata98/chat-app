@@ -1,6 +1,9 @@
 name: OTA Update
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       message:
@@ -32,7 +35,7 @@ jobs:
 
       - name: Publish production OTA update
         run: |
-          MESSAGE="${{ github.event.inputs.message }}"
+          MESSAGE="${{ github.event.inputs.message || github.event.head_commit.message || '' }}"
           if [ -n "$MESSAGE" ]; then
             eas update --channel production --message "$MESSAGE" --non-interactive
           else
