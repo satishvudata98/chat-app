@@ -609,6 +609,7 @@ export default function ChatScreen() {
       ) : (
         <FlatList
           inverted
+          style={styles.messageList}
           data={reversedMessages}
           keyExtractor={(item) => item._id}
           renderItem={renderItem}
@@ -791,6 +792,9 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  messageList: {
+    flex: 1,
   },
   messagesContainer: {
     paddingHorizontal: 10,

@@ -45,7 +45,6 @@ export default defineSchema({
     isEncrypted: v.optional(v.boolean()),
     isEdited: v.optional(v.boolean()),
     editedAt: v.optional(v.number()),
-    isDeleted: v.optional(v.boolean()),
     replyToId: v.optional(v.id("messages")),
     callId: v.optional(v.id("calls")),
     callMode: v.optional(v.union(v.literal("audio"), v.literal("video"))),
