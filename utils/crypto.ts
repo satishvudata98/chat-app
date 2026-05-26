@@ -1,6 +1,19 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 
+// Hermes (React Native) exposes crypto on globalThis, not on self.
+// tweetnacl looks for self.crypto, so we must manually wire up the PRNG.
+(function setupNaclPRNG() {
+  const cryptoObj: Crypto | undefined =
+    (typeof globalThis !== 'undefined' && (globalThis as any).crypto) ||
+    (typeof global !== 'undefined' && (global as any).crypto);
+  if (cryptoObj?.getRandomValues) {
+    nacl.setPRNG((x: Uint8Array, n: number) => {
+      cryptoObj.getRandomValues(x.subarray(0, n));
+    });
+  }
+})();
+
 export function generateKeyPair(): { publicKey: string; privateKey: string } {
   const kp = nacl.box.keyPair();
   return {
