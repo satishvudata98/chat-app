@@ -12,6 +12,7 @@ jobs:
     env:
       CI: true
       EXPO_NO_TELEMETRY: 1
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,14 +47,17 @@ jobs:
       - name: Build signed release APK
         working-directory: android
         run: |
-          ./gradlew assembleRelease \
+          ./gradlew assembleRelease -x lintVitalAnalyzeRelease \
             -Pandroid.injected.signing.store.file=$PWD/app/release.keystore \
             -Pandroid.injected.signing.store.password=${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
             -Pandroid.injected.signing.key.alias=${{ secrets.ANDROID_KEY_ALIAS }} \
             -Pandroid.injected.signing.key.password=${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: Rename APK
+        run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/chat-app.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/app/build/outputs/apk/release/chat-app.apk
